@@ -1,0 +1,35 @@
+name: Docker CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build containers
+        run: docker compose build
+
+      - name: Run containers
+        run: docker compose up -d
+
+      - name: Wait for services
+        run: sleep 20
+
+      - name: Check containers
+        run: docker ps
+
+      - name: Test vote service
+        run: curl -f http://localhost:8080
+
+      - name: Test result service
+        run: curl -f http://localhost:8081
+
+      - name: Stop containers
+        run: docker compose down
