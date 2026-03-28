@@ -18,6 +18,6 @@ jobs:
           script: |
             cd /app/docker-compose-test
             git fetch origin          
-            git pull
+            git pull origin main
             docker compose down
             docker compose up -d --build
