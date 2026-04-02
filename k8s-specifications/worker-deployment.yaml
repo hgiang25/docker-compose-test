@@ -1,8 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    app: worker
   name: worker
 spec:
   replicas: 1
@@ -15,5 +13,11 @@ spec:
         app: worker
     spec:
       containers:
-      - image: dockersamples/examplevotingapp_worker
-        name: worker
+        - name: worker
+          image: hgyang25/worker-app:latest
+          imagePullPolicy: Always
+          env:
+            - name: REDIS_HOST
+              value: redis
+            - name: DB_HOST
+              value: db

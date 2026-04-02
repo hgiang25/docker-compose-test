@@ -1,8 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  labels:
-    app: redis
   name: redis
 spec:
   replicas: 1
@@ -15,14 +13,15 @@ spec:
         app: redis
     spec:
       containers:
-      - image: redis:alpine
-        name: redis
-        ports:
-        - containerPort: 6379
-          name: redis
-        volumeMounts:
-        - mountPath: /data
-          name: redis-data
+        - name: redis
+          image: redis:alpine
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - mountPath: /data
+              name: redis-data
       volumes:
-      - name: redis-data
-        emptyDir: {} 
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-pvc
