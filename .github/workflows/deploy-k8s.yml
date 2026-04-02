@@ -19,16 +19,20 @@ jobs:
       # 🐳 Build images
       - name: Build images
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/vote-app ./vote
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/result-app ./result
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/worker-app ./worker
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/vote-app:${{ github.sha }} ./vote
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/result-app:${{ github.sha }} ./result
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/worker-app:${{ github.sha }} ./worker
 
       # 📤 Push images
       - name: Push images
         run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/vote-app
-          docker push ${{ secrets.DOCKER_USERNAME }}/result-app
-          docker push ${{ secrets.DOCKER_USERNAME }}/worker-app
+          docker push ${{ secrets.DOCKER_USERNAME }}/vote-app:${{ github.sha }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/result-app:${{ github.sha }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/worker-app:${{ github.sha }}
+
+      - name: Update image tag
+        run: |
+          sed -i "s|REPLACE_TAG|${{ github.sha }}|g" k8s-specifications/*.yaml
 
       # ☁️ AWS login
       - name: Configure AWS
