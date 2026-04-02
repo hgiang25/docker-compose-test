@@ -1,4 +1,4 @@
-name: Deploy to EKS
+name: Build & Deploy to Kubernetes
 
 on:
   push:
@@ -9,26 +9,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
+      # 🔐 Login Docker Hub
       - name: Login Docker Hub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Build & Push
+      # 🐳 Build images
+      - name: Build images
         run: |
-          docker build -t hgyang25/vote-app ./vote
-          docker push hgyang25/vote-app
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/vote-app ./vote
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/result-app ./result
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/worker-app ./worker
 
-          docker build -t hgyang25/result-app ./result
-          docker push hgyang25/result-app
-
-          docker build -t hgyang25/worker-app ./worker
-          docker push hgyang25/worker-app
-
-      - name: Setup kubectl
+      # 📤 Push images
+      - name: Push images
         run: |
-          aws eks update-kubeconfig --region ap-southeast-1 --name voting-cluster
+          docker push ${{ secrets.DOCKER_USERNAME }}/vote-app
+          docker push ${{ secrets.DOCKER_USERNAME }}/result-app
+          docker push ${{ secrets.DOCKER_USERNAME }}/worker-app
 
+      # ☁️ AWS login
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ap-southeast-1
+
+      # 🔗 Connect Kubernetes
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region ap-southeast-1 --name voting-cluster
+
+      # 🚀 Deploy
       - name: Deploy to Kubernetes
         run: kubectl apply -f k8s-specifications/
