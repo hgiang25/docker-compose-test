@@ -1,4 +1,4 @@
-name: Docker CI
+name: CI - Build & Test Docker Images
 
 on:
   push:
@@ -6,30 +6,44 @@ on:
   pull_request:
 
 jobs:
-  test:
+  build-test:
     runs-on: ubuntu-latest
 
     steps:
+      # 📥 Checkout
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Build containers
-        run: docker compose build
+      # 🔐 Login Docker Hub
+      - name: Login Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Run containers
-        run: docker compose up -d
+      # 🐳 Build images
+      - name: Build images
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/vote-app:latest ./vote
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/result-app:latest ./result
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/worker-app:latest ./worker
 
-      - name: Wait for services
-        run: sleep 20
-
-      - name: Check containers
-        run: docker ps
-
+      # 🧪 Test vote container
       - name: Test vote service
-        run: curl -f http://localhost:8080
+        run: |
+          docker run -d -p 8080:80 --name vote-test ${{ secrets.DOCKER_USERNAME }}/vote-app:latest
+          sleep 10
+          curl -f http://localhost:8080
+          docker rm -f vote-test
 
+      # 🧪 Test result container
       - name: Test result service
-        run: curl -f http://localhost:8081
+        run: |
+          docker run -d -p 8081:80 --name result-test ${{ secrets.DOCKER_USERNAME }}/result-app:latest
+          sleep 10
+          curl -f http://localhost:8081
+          docker rm -f result-test
 
-      - name: Stop containers
-        run: docker compose down
+      # 📤 Push images
+      - name: Push images
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/vote-app:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/result-app:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/worker-app:latest

@@ -3,6 +3,7 @@ name: Deploy App to EKS
 
 on:
   push:
+    branches: ["main"]
     paths:
       - "vote/**"
       - "result/**"

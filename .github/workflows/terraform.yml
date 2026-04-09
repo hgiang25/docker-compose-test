@@ -2,6 +2,7 @@ name: Terraform Infrastructure
 
 on:
   push:
+    branches: ["main"]
     paths:
       - "infrastructure/**"
 
