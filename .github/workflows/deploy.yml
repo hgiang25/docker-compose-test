@@ -9,6 +9,7 @@ on:
       - "result/**"
       - "worker/**"
       - "k8s-specifications/**"
+    workflow_dispatch:
 
 jobs:
   deploy:

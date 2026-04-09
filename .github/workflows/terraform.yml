@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "infrastructure/**"
+  workflow_dispatch:
 
 jobs:
   # 🔹 STEP 1: BOOTSTRAP
