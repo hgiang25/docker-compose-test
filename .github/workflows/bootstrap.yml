@@ -1,0 +1,39 @@
+name: Terraform Bootstrap
+
+on:
+  workflow_dispatch: # 🔥 chỉ chạy khi bấm nút
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ap-southeast-1
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure/bootstrap
+
+      # 👉 thêm import chống crash
+      - name: Import S3 (if exists)
+        run: |
+          terraform import aws_s3_bucket.tf_state terraform-state-voting-app-123456 || true
+        working-directory: infrastructure/bootstrap
+
+      - name: Import DynamoDB (if exists)
+        run: |
+          terraform import aws_dynamodb_table.tf_lock terraform-lock || true
+        working-directory: infrastructure/bootstrap
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        working-directory: infrastructure/bootstrap
