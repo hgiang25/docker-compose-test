@@ -27,6 +27,13 @@ module "eks" {
   private_subnet_ids = module.vpc.private_subnet_ids
 }
 
+# ========================
+# K8S AUTH (🔥 QUAN TRỌNG)
+# ========================
+data "aws_eks_cluster_auth" "this" {
+  name = "voting-cluster"
+}
+
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
