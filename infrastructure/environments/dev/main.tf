@@ -27,6 +27,15 @@ module "eks" {
   private_subnet_ids = module.vpc.private_subnet_ids
 }
 
+
+module "argocd" {
+  source = "../../modules/argocd"
+
+  cluster_endpoint = module.eks.cluster_endpoint
+  cluster_ca       = module.eks.cluster_certificate_authority_data
+  cluster_token    = data.aws_eks_cluster_auth.this.token
+}
+
 # ========================
 # K8S AUTH (🔥 QUAN TRỌNG)
 # ========================

@@ -1,0 +1,68 @@
+name: CI + GitOps Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout app repo
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Login DockerHub
+      - name: Login Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      # 3. Build & Push
+      - name: Build & Push images
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/vote-app:${GITHUB_SHA} ./vote
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/result-app:${GITHUB_SHA} ./result
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/worker-app:${GITHUB_SHA} ./worker
+
+          docker push ${{ secrets.DOCKER_USERNAME }}/vote-app:${GITHUB_SHA}
+          docker push ${{ secrets.DOCKER_USERNAME }}/result-app:${GITHUB_SHA}
+          docker push ${{ secrets.DOCKER_USERNAME }}/worker-app:${GITHUB_SHA}
+
+      # 4. Clone GitOps repo
+      - name: Clone GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: hgiang25/k8s-gitops
+          token: ${{ secrets.GITOPS_PAT }}
+          path: k8s-gitops
+
+      # 5. Update image tag
+      - name: Update image tag
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          cd k8s-gitops
+
+          sed -i "/vote-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
+          sed -i "/result-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
+          sed -i "/worker-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
+
+      # 6. Commit & push
+      - name: Commit & push
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          cd k8s-gitops
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          git diff --quiet || git commit -m "update $ENV image to ${GITHUB_SHA}"
+          git push origin main

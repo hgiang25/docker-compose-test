@@ -1,0 +1,28 @@
+server:
+  service:
+    type: LoadBalancer
+
+configs:
+  params:
+    server.insecure: true
+
+controller:
+  enableStatefulSet: true
+
+# Tự động "mồi" app-of-apps ngay khi cài Helm
+server:
+  additionalApplications:
+    - name: root-app
+      namespace: argocd
+      project: default
+      source:
+        repoURL: https://github.com/hgiang25/k8s-gitops.git
+        targetRevision: main
+        path: argocd
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
