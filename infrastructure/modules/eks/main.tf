@@ -60,16 +60,38 @@ resource "aws_iam_role" "eks_admin_role" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        AWS = "arn:aws:iam::379264687346:user/giang-devops"
+        AWS = "arn:aws:iam::248195880649:user/hgiang2352"
       }
       Action = "sts:AssumeRole"
     }]
   })
 }
 
+resource "aws_iam_policy" "eks_admin_limited" {
+  name = "EKSAdminLimitedPolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "eks:*",
+          "ec2:Describe*",
+          "ec2:CreateSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "iam:PassRole"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role_policy_attachment" "eks_admin_attach" {
   role       = aws_iam_role.eks_admin_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+  policy_arn = aws_iam_policy.eks_admin_limited.arn
 }
 
 resource "aws_security_group_rule" "allow_nodeport" {

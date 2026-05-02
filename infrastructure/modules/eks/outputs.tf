@@ -3,7 +3,7 @@ output "cluster_name" {
 }
 
 output "cluster_endpoint" {
-  value = "ap-southeast-1"
+  value = module.eks.cluster_endpoint
 }
 
 output "cluster_ca" {
