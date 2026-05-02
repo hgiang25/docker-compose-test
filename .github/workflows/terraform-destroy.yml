@@ -1,6 +1,5 @@
 name: "Terraform Destroy EKS & VPC"
 
-# Chỉ cho phép chạy thủ công để tránh vô tình xóa nhầm hạ tầng
 on:
   workflow_dispatch:
     inputs:
@@ -12,15 +11,14 @@ on:
 env:
   AWS_REGION: "ap-southeast-1"
   EKS_CLUSTER_NAME: "voting-cluster"
-  # Đường dẫn tới thư mục chứa file main.tf của bạn
   TF_WORKING_DIR: "./infrastructure/environments/dev"
 
 jobs:
   destroy:
     name: "Clean up and Destroy"
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
-    # Chỉ chạy khi người dùng gõ đúng chữ DESTROY
     if: github.event.inputs.confirm_destroy == 'DESTROY'
 
     defaults:
@@ -28,8 +26,7 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
 
     steps:
-      - name: ⬇️ Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: 🔐 Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -38,39 +35,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ap-southeast-1
 
-      - name: 🛠️ Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.5.7" # Có thể đổi thành version bạn đang dùng
+      - uses: hashicorp/setup-terraform@v3
 
       - name: 📦 Terraform Init
-        id: init
         run: terraform init
 
-      # ==========================================
-      # BƯỚC QUAN TRỌNG: DỌN DẸP KUBERNETES TRƯỚC
-      # ==========================================
+      # Connect EKS
       - name: ☸️ Connect to EKS Cluster
-        # Bước này có thể thất bại nếu cluster đã bị xóa một nửa, nên thêm '|| true' để không dừng pipeline
         run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} || true
 
-      - name: 🧹 Clean up Kubernetes Resources (LoadBalancers, PVCs)
-        # Lệnh này sẽ xóa các Service (LB) và Ingress để AWS thu hồi lại Elastic IP và Network Interfaces
-        # Thêm '|| true' để bỏ qua nếu cluster không kết nối được
+      # Verify access
+      - name: Verify cluster access
+        run: kubectl get nodes || echo "Cluster not accessible"
+
+      # Cleanup k8s
+      - name: 🧹 Clean up Kubernetes Resources
         run: |
-          kubectl delete svc --all --all-namespaces || true
-          kubectl delete ingress --all --all-namespaces || true
+          kubectl delete svc --all --all-namespaces --wait=true || true
+          kubectl delete ingress --all --all-namespaces --wait=true || true
           kubectl delete pvc --all --all-namespaces || true
-          echo "Đợi 45 giây để AWS dọn dẹp các Network Interfaces (ENI) và Load Balancers..."
-          sleep 45
+          echo "Waiting AWS cleanup..."
+          sleep 60
 
-      # ==========================================
-      # BƯỚC TIÊU DIỆT HẠ TẦNG BẰNG TERRAFORM
-      # ==========================================
+      # Destroy EKS first (retry)
       - name: 💥 Terraform Destroy - Target EKS
-        # Ưu tiên xóa sạch sẽ cụm EKS trước để nhả các IP public và Subnet
-        run: terraform destroy -target="module.eks" -auto-approve
+        run: |
+          terraform destroy -target="module.eks" -auto-approve || \
+          terraform destroy -target="module.eks" -auto-approve
 
-      - name: 🧨 Terraform Destroy - All Remaining Resources
-        # Xóa các thành phần còn lại như VPC, Subnets, IGW, NAT Gateway
+      # Destroy all
+      - name: 🧨 Terraform Destroy - All
         run: terraform destroy -auto-approve
