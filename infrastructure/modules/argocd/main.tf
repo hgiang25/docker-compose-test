@@ -20,5 +20,7 @@ resource "helm_release" "argocd" {
 
   timeout          = 1200 # Tăng hẳn lên 20 phút cho chắc ăn
   wait             = true
+  force_update    = true
+  recreate_pods   = true
   cleanup_on_fail  = true # Nếu lỗi thì xóa làm lại sạch sẽ
 }
