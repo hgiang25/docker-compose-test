@@ -1,9 +1,15 @@
-provider "helm" {
-  kubernetes = {
-    host                   = var.cluster_endpoint
-    token                  = var.cluster_token
-    cluster_ca_certificate = base64decode(var.cluster_ca)
+module "argocd" {
+  source = "../../modules/argocd"
+
+  providers = {
+    helm = helm
   }
+
+  cluster_endpoint = module.eks.cluster_endpoint
+  cluster_ca       = module.eks.cluster_ca
+  cluster_token    = data.aws_eks_cluster_auth.this.token
+
+  depends_on = [module.eks] # ✅ giờ dùng được
 }
 
 resource "kubernetes_namespace" "argocd" {
