@@ -1,3 +1,10 @@
-variable "cluster_endpoint" {}
-variable "cluster_ca" {}
-variable "cluster_token" {}
+terraform {
+  required_providers {
+    helm = {
+      source = "hashicorp/helm"
+    }
+    kubernetes = {
+      source = "hashicorp/kubernetes"
+    }
+  }
+}

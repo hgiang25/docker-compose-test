@@ -31,9 +31,10 @@ module "eks" {
 module "argocd" {
   source = "../../modules/argocd"
 
-  cluster_endpoint = module.eks.cluster_endpoint
-  cluster_ca       = module.eks.cluster_ca   # ✅ FIX
-  cluster_token    = data.aws_eks_cluster_auth.this.token
+  providers = {
+    helm       = helm
+    kubernetes = kubernetes
+  }
 
   depends_on = [module.eks]
 }
