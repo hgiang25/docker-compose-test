@@ -21,10 +21,27 @@ module "eks" {
   #enable_ebs_csi_driver = true    
 
   cluster_addons = {
+    coredns = {
+      most_recent = true
+    }
+    kube-proxy = {
+      most_recent = true
+    }
+    
+    # 🔥 THÊM/SỬA BLOCK NÀY ĐỂ TĂNG SỐ LƯỢNG POD CHO T3.MICRO
+    vpc-cni = {
+      most_recent    = true
+      before_compute = true
+      configuration_values = jsonencode({
+        env = {
+          ENABLE_PREFIX_DELEGATION = "true"
+          WARM_PREFIX_TARGET       = "1"
+        }
+      })
+    }
+    
     aws-ebs-csi-driver = {
       most_recent = true
-
-      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
   }
 
@@ -35,7 +52,7 @@ module "eks" {
       max_size     = 3
       min_size     = 1
 
-      instance_types = ["t3.medium"]
+      instance_types = ["t3.micro"]
 
       subnet_ids = var.private_subnet_ids
 
