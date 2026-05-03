@@ -3,24 +3,24 @@ server:
     type: LoadBalancer
 
 # Đây là phần quan trọng để tự động tạo root-app
-server:
-  additionalApplications: 
-    - name: root-app
-      namespace: argocd
-      project: default
-      source:
-        repoURL: https://github.com/hgiang25/k8s-gitops.git
-        targetRevision: main
-        path: argocd
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: argocd
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
+# server:
+#   additionalApplications:
+#     - name: root-app
+#       namespace: argocd
+#       project: default
+#       source:
+#         repoURL: https://github.com/hgiang25/k8s-gitops.git
+#         targetRevision: main
+#         path: argocd
+#       destination:
+#         server: https://kubernetes.default.svc
+#         namespace: argocd
+#       syncPolicy:
+#         automated:
+#           prune: true
+#           selfHeal: true
+#         syncOptions:
+#           - CreateNamespace=true
 
 configs:
   params:
