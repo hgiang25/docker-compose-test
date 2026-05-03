@@ -45,14 +45,20 @@ jobs:
           path: k8s-gitops
 
       # 5. Update image tag
+      - name: Install yq
+        run: sudo apt-get update && sudo apt-get install -y yq
+
       - name: Update image tag
         run: |
           ENV=${{ github.event.inputs.environment }}
           cd k8s-gitops
 
-          sed -i "/vote-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
-          sed -i "/result-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
-          sed -i "/worker-app/{n;s/newTag:.*/newTag: ${GITHUB_SHA}/}" apps/$ENV/kustomization.yaml
+          yq -i '.images[] |=
+            if .name == "hgyang25/vote-app" then .newTag = strenv(GITHUB_SHA)
+            elif .name == "hgyang25/result-app" then .newTag = strenv(GITHUB_SHA)
+            elif .name == "hgyang25/worker-app" then .newTag = strenv(GITHUB_SHA)
+            else .
+            end' apps/$ENV/kustomization.yaml
 
       # 6. Commit & push
       - name: Commit & push

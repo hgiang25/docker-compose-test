@@ -32,8 +32,10 @@ module "argocd" {
   source = "../../modules/argocd"
 
   cluster_endpoint = module.eks.cluster_endpoint
-  cluster_ca       = module.eks.cluster_certificate_authority_data
+  cluster_ca       = module.eks.cluster_ca   # ✅ FIX
   cluster_token    = data.aws_eks_cluster_auth.this.token
+
+  depends_on = [module.eks]
 }
 
 # ========================
@@ -43,8 +45,9 @@ data "aws_eks_cluster_auth" "this" {
   name = "voting-cluster"
 }
 
+
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
-  token = data.aws_eks_cluster_auth.this.token
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  token                  = data.aws_eks_cluster_auth.this.token
+  cluster_ca_certificate = base64decode(module.eks.cluster_ca) # ✅ FIX
 }

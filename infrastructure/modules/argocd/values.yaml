@@ -2,15 +2,6 @@ server:
   service:
     type: LoadBalancer
 
-configs:
-  params:
-    server.insecure: true
-
-controller:
-  enableStatefulSet: true
-
-# Tự động "mồi" app-of-apps ngay khi cài Helm
-server:
   additionalApplications:
     - name: root-app
       namespace: argocd
@@ -26,3 +17,10 @@ server:
         automated:
           prune: true
           selfHeal: true
+
+configs:
+  params:
+    server.insecure: true
+
+controller:
+  enableStatefulSet: true
