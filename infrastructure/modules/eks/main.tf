@@ -36,12 +36,14 @@ module "eks" {
         env = {
           ENABLE_PREFIX_DELEGATION = "true"
           WARM_PREFIX_TARGET       = "1"
+          MINIMUM_IP_TARGET        = "2"
         }
       })
     }
     
     aws-ebs-csi-driver = {
       most_recent = true
+      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
   }
 
@@ -52,7 +54,7 @@ module "eks" {
       max_size     = 3
       min_size     = 1
 
-      instance_types = ["t3.micro"]
+      instance_types = ["c7i-flex.large"]
 
       subnet_ids = var.private_subnet_ids
 

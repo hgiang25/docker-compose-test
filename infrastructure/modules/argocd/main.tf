@@ -17,4 +17,8 @@ resource "helm_release" "argocd" {
 
   # Thêm dòng này để chắc chắn namespace tạo xong mới chạy Helm
   depends_on = [kubernetes_namespace_v1.argocd]
+
+  timeout          = 1200 # Tăng hẳn lên 20 phút cho chắc ăn
+  wait             = true
+  cleanup_on_fail  = true # Nếu lỗi thì xóa làm lại sạch sẽ
 }
