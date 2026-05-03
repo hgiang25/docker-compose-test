@@ -44,21 +44,16 @@ jobs:
           token: ${{ secrets.GITOPS_PAT }}
           path: k8s-gitops
 
-      # 5. Update image tag
-      - name: Install yq
-        run: sudo apt-get update && sudo apt-get install -y yq
-
+      # 5. Update image tag using Kustomize
       - name: Update image tag
         run: |
           ENV=${{ github.event.inputs.environment }}
-          cd k8s-gitops
+          cd k8s-gitops/apps/$ENV
 
-          yq -i '.images[] |=
-            if .name == "hgyang25/vote-app" then .newTag = strenv(GITHUB_SHA)
-            elif .name == "hgyang25/result-app" then .newTag = strenv(GITHUB_SHA)
-            elif .name == "hgyang25/worker-app" then .newTag = strenv(GITHUB_SHA)
-            else .
-            end' apps/$ENV/kustomization.yaml
+          # Kustomize sẽ tự động tìm image có name khớp và đổi newTag thành SHA mới
+          kustomize edit set image hgyang25/vote-app=hgyang25/vote-app:${GITHUB_SHA}
+          kustomize edit set image hgyang25/result-app=hgyang25/result-app:${GITHUB_SHA}
+          kustomize edit set image hgyang25/worker-app=hgyang25/worker-app:${GITHUB_SHA}
 
       # 6. Commit & push
       - name: Commit & push
