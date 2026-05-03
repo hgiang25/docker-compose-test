@@ -2,7 +2,9 @@ server:
   service:
     type: LoadBalancer
 
-  additionalApplications:
+# Đây là phần quan trọng để tự động tạo root-app
+server:
+  additionalApplications: 
     - name: root-app
       namespace: argocd
       project: default
@@ -17,6 +19,8 @@ server:
         automated:
           prune: true
           selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
 
 configs:
   params:
