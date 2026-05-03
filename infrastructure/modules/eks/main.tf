@@ -35,7 +35,7 @@ module "eks" {
       max_size     = 3
       min_size     = 1
 
-      instance_types = ["t3.micro"]
+      instance_types = ["t3.medium"]
 
       subnet_ids = var.private_subnet_ids
 

@@ -1,4 +1,4 @@
-resource "kubernetes_namespace" "argocd" {
+resource "kubernetes_namespace_v1" "argocd" {
   metadata {
     name = "argocd"
   }
@@ -14,4 +14,7 @@ resource "helm_release" "argocd" {
   create_namespace = true
 
   values = [file("${path.module}/values.yaml")]
+
+  # Thêm dòng này để chắc chắn namespace tạo xong mới chạy Helm
+  depends_on = [kubernetes_namespace_v1.argocd]
 }
