@@ -133,7 +133,7 @@ resource "aws_security_group_rule" "allow_elb_to_node" {
   to_port                  = 65535
   protocol                 = "tcp"
   security_group_id        = module.eks.node_security_group_id
-  source_security_group_id = module.eks.cluster_primary_security_group_id
+  cidr_blocks       = ["0.0.0.0/0"]
 
   description = "Allow ELB to access nodes"
 }
