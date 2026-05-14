@@ -52,10 +52,8 @@ jobs:
           docker push $ECR_REGISTRY/worker-app:${GITHUB_SHA}
 
       # 6. Install Kustomize
-      - name: Install Kustomize
-        run: |
-          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
-          sudo mv kustomize /usr/local/bin/
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
 
       # 7. Clone GitOps repo
       - name: Clone GitOps Repo
