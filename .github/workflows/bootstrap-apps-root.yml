@@ -1,0 +1,39 @@
+name: Bootstrap GitOps Apps
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap-apps:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-southeast-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Connect cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name management-cluster \
+            --region $AWS_REGION
+
+      - name: Wait ArgoCD
+        run: |
+          kubectl rollout status deployment/argocd-server \
+            -n argocd \
+            --timeout=600s
+
+      - name: Apply App Of Apps
+        run: |
+          kubectl apply \
+            -f infrastructure/modules/argocd/app-of-apps.yaml

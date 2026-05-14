@@ -175,19 +175,3 @@ resource "time_sleep" "wait_argocd" {
   create_duration = "180s"
 }
 
-# Bootstrap App Of Apps
-resource "null_resource" "root_app" {
-  depends_on = [
-    time_sleep.wait_argocd
-  ]
-
-  provisioner "local-exec" {
-    command = <<EOT
-aws eks update-kubeconfig \
-  --name management-cluster \
-  --region ap-southeast-1
-
-kubectl apply -f ${path.module}/app-of-apps.yaml
-EOT
-  }
-}
