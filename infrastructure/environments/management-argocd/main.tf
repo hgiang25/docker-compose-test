@@ -48,7 +48,7 @@ provider "kubernetes" {
 }
 
 provider "helm" {
-  kubernetes = {
+  kubernetes {
     host = data.terraform_remote_state.management.outputs.cluster_endpoint
 
     token = data.aws_eks_cluster_auth.this.token
