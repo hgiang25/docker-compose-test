@@ -4,6 +4,16 @@ terraform {
       source  = "hashicorp/aws"
       version = "= 5.36.0"
     }
+
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.13"
+    }
+
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.29"
+    }
   }
 }
 
@@ -60,11 +70,11 @@ resource "helm_release" "argo_rollouts" {
 }
 
 provider "helm" {
-  kubernetes = {
+  kubernetes {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
 
-    exec = {
+    exec {
       api_version = "client.authentication.k8s.io/v1beta1"
 
       command = "aws"
@@ -102,4 +112,37 @@ provider "kubernetes" {
       "ap-southeast-1"
     ]
   }
+}
+
+resource "helm_release" "metrics_server" {
+  name       = "metrics-server"
+  namespace  = "kube-system"
+
+  repository = "https://kubernetes-sigs.github.io/metrics-server/"
+  chart      = "metrics-server"
+  version    = "3.13.0"
+
+  create_namespace = false
+
+  wait    = true
+  timeout = 600
+
+  set {
+    name  = "args[0]"
+    value = "--kubelet-insecure-tls"
+  }
+
+  set {
+    name  = "args[1]"
+    value = "--kubelet-preferred-address-types=InternalIP"
+  }
+
+  set {
+    name  = "apiService.create"
+    value = "true"
+  }
+
+  depends_on = [
+    module.eks
+  ]
 }

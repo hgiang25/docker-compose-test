@@ -5,12 +5,14 @@ terraform {
       version = "= 5.36.0"
     }
 
-    kubernetes = {
-      source = "hashicorp/kubernetes"
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.13"
     }
 
-    helm = {
-      source = "hashicorp/helm"
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.29"
     }
 
     time = {    
