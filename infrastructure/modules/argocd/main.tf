@@ -50,7 +50,23 @@ resource "helm_release" "metrics_server" {
 
   repository = "https://kubernetes-sigs.github.io/metrics-server/"
   chart      = "metrics-server"
-  version    = "3.12.2"
+  version    = "3.13.0"
+
+  create_namespace = false
+
+  wait             = true
+  atomic           = true
+  cleanup_on_fail  = true
+  force_update     = true
+  recreate_pods    = true
+  dependency_update = true
+
+  timeout = 900
+
+  set {
+    name  = "apiService.create"
+    value = "true"
+  }
 
   set {
     name  = "args[0]"
@@ -60,6 +76,11 @@ resource "helm_release" "metrics_server" {
   set {
     name  = "args[1]"
     value = "--kubelet-preferred-address-types=InternalIP"
+  }
+
+  set {
+    name  = "args[2]"
+    value = "--metric-resolution=15s"
   }
 
   depends_on = [
