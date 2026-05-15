@@ -2,6 +2,8 @@ module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "20.0.0"
 
+  create_cloudwatch_log_group = false
+
   cluster_name    = var.cluster_name
   cluster_version = "1.34"
 
@@ -16,7 +18,7 @@ module "eks" {
   cluster_endpoint_private_access = true
 
   # Bootstrap admin cluster creator
-  enable_cluster_creator_admin_permissions = true
+  # enable_cluster_creator_admin_permissions = true
 
   #enable_ebs_csi_driver = true    
 
@@ -161,4 +163,25 @@ module "ebs_csi_irsa_role" {
       ]
     }
   }
+}
+
+resource "aws_eks_access_entry" "admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = "arn:aws:iam::248195880649:user/hgiang2352"
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "admin" {
+  cluster_name  = module.eks.cluster_name
+  principal_arn = "arn:aws:iam::248195880649:user/hgiang2352"
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [
+    aws_eks_access_entry.admin
+  ]
 }

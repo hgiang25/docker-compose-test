@@ -54,95 +54,19 @@ module "eks" {
   enviroment = "dev"
 }
 
-resource "helm_release" "argo_rollouts" {
-  name       = "argo-rollouts"
-  namespace  = "argo-rollouts"
+# Gọi module addons duy nhất thay vì khai báo rời rạc
+module "eks_addons" {
+  source = "../../modules/addons"
 
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argo-rollouts"
-  version    = "2.37.6"
+  cluster_name      = module.eks.cluster_name
+  cluster_endpoint  = module.eks.cluster_endpoint
+  cluster_ca        = module.eks.cluster_ca
+  oidc_provider_arn = module.eks.oidc_provider_arn
+  vpc_id            = module.vpc.vpc_id
+  region            = "ap-southeast-1"
 
-  create_namespace = true
-
-  depends_on = [
-    module.eks
-  ]
-}
-
-provider "helm" {
-  kubernetes {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-
-      command = "aws"
-
-      args = [
-        "eks",
-        "get-token",
-        "--cluster-name",
-        module.eks.cluster_name,
-        "--region",
-        "ap-southeast-1"
-      ]
-    }
-  }
-}
-
-provider "kubernetes" {
-  host = module.eks.cluster_endpoint
-
-  cluster_ca_certificate = base64decode(
-    module.eks.cluster_certificate_authority_data
-  )
-
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-
-    command = "aws"
-
-    args = [
-      "eks",
-      "get-token",
-      "--cluster-name",
-      module.eks.cluster_name,
-      "--region",
-      "ap-southeast-1"
-    ]
-  }
-}
-
-resource "helm_release" "metrics_server" {
-  name       = "metrics-server"
-  namespace  = "kube-system"
-
-  repository = "https://kubernetes-sigs.github.io/metrics-server/"
-  chart      = "metrics-server"
-  version    = "3.13.0"
-
-  create_namespace = false
-
-  wait    = true
-  timeout = 600
-
-  set {
-    name  = "args[0]"
-    value = "--kubelet-insecure-tls"
-  }
-
-  set {
-    name  = "args[1]"
-    value = "--kubelet-preferred-address-types=InternalIP"
-  }
-
-  set {
-    name  = "apiService.create"
-    value = "true"
-  }
-
-  depends_on = [
-    module.eks
-  ]
+  metrics_server_version = "3.13.0"
+  argo_rollouts_version  = "2.37.6"
+  aws_lb_controller_ver  = "1.7.2"
+  cluster_autoscaler_ver = "9.37.0"
 }
