@@ -196,6 +196,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # =====================================================
+      # WAIT DEV NODES READY
+      # =====================================================
       - name: Wait for dev nodes ready
         run: |
           echo "Waiting for EKS nodes..."
@@ -204,23 +207,19 @@ jobs:
             --name dev-cluster \
             --region $AWS_REGION
 
-          for i in {1..40}; do
-            READY=$(kubectl get nodes \
-              --no-headers 2>/dev/null | grep -c " Ready")
+          kubectl wait \
+            --for=condition=Ready nodes \
+            --all \
+            --timeout=600s
 
-            echo "Ready nodes: $READY"
-
-            if [ "$READY" -ge 1 ]; then
-              echo "Nodes ready"
-              exit 0
-            fi
-
-            sleep 30
-          done
-
-          echo "Nodes not ready"
-          kubectl get nodes || true
-          exit 1
+      # =====================================================
+      # WAIT COREDNS READY
+      # =====================================================
+      - name: Wait for CoreDNS
+        run: |
+          kubectl rollout status deployment/coredns \
+            -n kube-system \
+            --timeout=600s
 
       # =====================================================
       # INIT
