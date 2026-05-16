@@ -83,9 +83,10 @@ resource "helm_release" "aws_lb_controller" {
 
   create_namespace = false
 
-  wait    = true
-  atomic  = false
   timeout = 300
+
+  wait   = false
+  atomic = false
 
   set {
     name  = "clusterName"
@@ -104,7 +105,7 @@ resource "helm_release" "aws_lb_controller" {
 
   set {
     name  = "serviceAccount.create"
-    value = "false"
+    value = "true"
   }
 
   set {
@@ -116,8 +117,4 @@ resource "helm_release" "aws_lb_controller" {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = module.aws_load_balancer_controller_irsa_role.iam_role_arn
   }
-
-  depends_on = [
-    module.aws_load_balancer_controller_irsa_role
-  ]
 }
