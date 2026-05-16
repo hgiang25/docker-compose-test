@@ -196,6 +196,32 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Wait for dev nodes ready
+        run: |
+          echo "Waiting for EKS nodes..."
+
+          aws eks update-kubeconfig \
+            --name dev-cluster \
+            --region $AWS_REGION
+
+          for i in {1..40}; do
+            READY=$(kubectl get nodes \
+              --no-headers 2>/dev/null | grep -c " Ready")
+
+            echo "Ready nodes: $READY"
+
+            if [ "$READY" -ge 1 ]; then
+              echo "Nodes ready"
+              exit 0
+            fi
+
+            sleep 30
+          done
+
+          echo "Nodes not ready"
+          kubectl get nodes || true
+          exit 1
+
       # =====================================================
       # INIT
       # =====================================================

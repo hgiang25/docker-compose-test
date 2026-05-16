@@ -77,13 +77,17 @@ resource "helm_release" "addons" {
   chart            = each.value.chart
   version          = each.value.version
   namespace        = each.value.namespace
-  create_namespace = true
-  atomic           = true
-  wait             = true
 
-  # Thêm dynamic block này để inject các giá trị cấu hình tùy chỉnh
+  create_namespace = true
+
+  atomic = true
+  wait   = true
+
+  timeout = 1200
+
   dynamic "set" {
     for_each = each.value.sets
+
     content {
       name  = set.key
       value = set.value
