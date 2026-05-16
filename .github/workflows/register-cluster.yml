@@ -80,28 +80,42 @@ jobs:
       # =========================================================
       # WAIT LOADBALANCER HOSTNAME
       # =========================================================
-      - name: Get ArgoCD Endpoint
+      - name: Wait ArgoCD Endpoint Ready
         run: |
-          echo "Waiting for ArgoCD LoadBalancer..."
+          echo "Waiting for ArgoCD ALB..."
 
-          for i in {1..30}; do
+          for i in {1..40}; do
             HOST=$(kubectl get ingress argocd-server \
               -n argocd \
               -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
-            if [ ! -z "$HOST" ]; then
-              echo "Found endpoint: $HOST"
+            if [ -n "$HOST" ]; then
+              echo "Hostname found: $HOST"
 
-              echo "ARGO_HOST=$HOST" >> $GITHUB_ENV
+              # DNS resolve test
+              if nslookup $HOST > /dev/null 2>&1; then
+                echo "DNS resolved successfully"
 
-              exit 0
+                # HTTP connectivity test
+                if curl -s --max-time 10 http://$HOST >/dev/null; then
+                  echo "ALB reachable"
+
+                  echo "ARGO_HOST=$HOST" >> $GITHUB_ENV
+                  exit 0
+                fi
+
+                echo "DNS OK but ALB not reachable yet..."
+              else
+                echo "Hostname exists but DNS not propagated yet..."
+              fi
+            else
+              echo "Ingress hostname not assigned yet..."
             fi
 
-            echo "Waiting for LoadBalancer..."
             sleep 20
           done
 
-          echo "ArgoCD LoadBalancer not ready"
+          echo "ArgoCD endpoint not ready"
           exit 1
 
       # =========================================================
@@ -123,7 +137,6 @@ jobs:
             --password "$ARGO_PASSWORD" \
             --insecure \
             --grpc-web \
-            --plaintext
 
       # =========================================================
       # REGISTER DEV CLUSTER
