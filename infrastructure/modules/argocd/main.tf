@@ -39,3 +39,11 @@ resource "time_sleep" "wait_argocd" {
 
   create_duration = "180s"
 }
+
+resource "time_sleep" "wait_alb_controller" {
+  depends_on = [
+    helm_release.argocd
+  ]
+
+  create_duration = "180s"
+}

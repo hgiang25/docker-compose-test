@@ -15,6 +15,7 @@ module "vpc" {
   source = "../../modules/vpc"
 
   environment     = "management"
+  cluster_name = "management-cluster"
   vpc_cidr        = "10.10.0.0/16"
 
   public_subnets = [

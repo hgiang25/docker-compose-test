@@ -21,22 +21,26 @@ locals {
       sets      = {}
     }
     aws_lb_controller = {
-        name      = "aws-load-balancer-controller"
-        repo      = "https://aws.github.io/eks-charts"
-        chart     = "aws-load-balancer-controller"
-        version   = var.aws_lb_controller_ver
-        namespace = "kube-system"
+      name      = "aws-load-balancer-controller"
+      repo      = "https://aws.github.io/eks-charts"
+      chart     = "aws-load-balancer-controller"
+      version   = var.aws_lb_controller_ver
+      namespace = "kube-system"
 
-        sets = {
-            "clusterName" = var.cluster_name
-            "region"      = var.region
-            "vpcId"       = var.vpc_id
+      sets = {
+        "clusterName" = var.cluster_name
+        "region"      = var.region
+        "vpcId"       = var.vpc_id
 
-            "serviceAccount.create" = "true"
-            "serviceAccount.name"   = "aws-load-balancer-controller"
+        "serviceAccount.create" = "false"
+        "serviceAccount.name"   = "aws-load-balancer-controller"
 
-            "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn" = module.aws_load_balancer_controller_irsa_role.iam_role_arn
-        }
+        "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn" =
+          module.aws_load_balancer_controller_irsa_role.iam_role_arn        
+
+        "enableServiceMutatorWebhook" = "true"
+        "enableBackendSecurityGroup" = "true"
+      }
     }
 
     cluster_autoscaler = {
@@ -54,6 +58,7 @@ locals {
             "extraArgs.skip-nodes-with-system-pods" = "false"
 
             "rbac.serviceAccount.create" = "true"
+            "rbac.serviceAccount.name"   = "cluster-autoscaler"
 
             "rbac.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn" = module.cluster_autoscaler_irsa_role.iam_role_arn
         }
