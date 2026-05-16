@@ -1,32 +1,14 @@
 server:
   service:
-    type: LoadBalancer
+    type: ClusterIP
 
-configs:
-  params:
-    server.insecure: true
+  ingress:
+    enabled: true
+    ingressClassName: alb
 
-controller:
-  enableStatefulSet: true
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
 
-# additionalApplications:
-#   - name: root-app
-#     namespace: argocd
-#     project: default
-
-#     source:
-#       repoURL: https://github.com/hgiang25/k8s-gitops.git
-#       targetRevision: main
-#       path: clusters
-
-#     destination:
-#       server: https://kubernetes.default.svc
-#       namespace: argocd
-
-#     syncPolicy:
-#       automated:
-#         prune: true
-#         selfHeal: true
-
-#       syncOptions:
-#         - CreateNamespace=true
+    hosts: []

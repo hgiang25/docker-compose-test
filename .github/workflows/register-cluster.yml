@@ -85,7 +85,8 @@ jobs:
           echo "Waiting for ArgoCD LoadBalancer..."
 
           for i in {1..30}; do
-            HOST=$(kubectl get svc argocd-server -n argocd \
+            HOST=$(kubectl get ingress argocd-server \
+              -n argocd \
               -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
             if [ ! -z "$HOST" ]; then

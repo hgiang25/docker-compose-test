@@ -20,7 +20,7 @@ module "eks" {
   # Bootstrap admin cluster creator
   # enable_cluster_creator_admin_permissions = true
 
-  #enable_ebs_csi_driver = true    
+  #enable_ebs_csi_driver = true  
 
   cluster_addons = {
     coredns = {
@@ -46,6 +46,7 @@ module "eks" {
     aws-ebs-csi-driver = {
       most_recent = true
       service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
+      depends_on = [module.ebs_csi_irsa_role]
     }
   }
 
@@ -121,29 +122,6 @@ resource "aws_iam_policy" "eks_admin_limited" {
 resource "aws_iam_role_policy_attachment" "eks_admin_attach" {
   role       = aws_iam_role.eks_admin_role.name
   policy_arn = aws_iam_policy.eks_admin_limited.arn
-}
-
-resource "aws_security_group_rule" "allow_nodeport" {
-  type              = "ingress"
-  from_port         = 30000
-  to_port           = 32767
-  protocol          = "tcp"
-  security_group_id = module.eks.node_security_group_id
-
-  cidr_blocks = ["0.0.0.0/0"]
-
-  description = "Allow NodePort range for Kubernetes services"
-}
-
-resource "aws_security_group_rule" "allow_elb_to_node" {
-  type                     = "ingress"
-  from_port                = 0
-  to_port                  = 65535
-  protocol                 = "tcp"
-  security_group_id        = module.eks.node_security_group_id
-  cidr_blocks       = ["0.0.0.0/0"]
-
-  description = "Allow ELB to access nodes"
 }
 
 module "ebs_csi_irsa_role" {

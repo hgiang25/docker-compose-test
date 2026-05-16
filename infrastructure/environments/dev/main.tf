@@ -24,8 +24,10 @@ provider "aws" {
 module "vpc" {
   source = "../../modules/vpc"
 
-  environment     = "dev"
-  vpc_cidr        = "10.0.0.0/16"
+  environment  = "dev"
+  cluster_name = "dev-cluster"
+
+  vpc_cidr = "10.0.0.0/16"
 
   public_subnets = [
     "10.0.1.0/24",
