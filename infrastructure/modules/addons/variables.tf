@@ -7,3 +7,5 @@ variable "region" {}
 variable "metrics_server_version" {}
 variable "argo_rollouts_version" {}
 variable "cluster_autoscaler_ver" {}
+variable "aws_lb_controller_ver" {}
+variable "vpc_id" {}
