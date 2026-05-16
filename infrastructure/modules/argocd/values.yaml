@@ -9,6 +9,10 @@ server:
     annotations:
       alb.ingress.kubernetes.io/scheme: internet-facing
       alb.ingress.kubernetes.io/target-type: ip
-      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
-
+      # Mở cả 2 cổng 80 và 443
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+      # Điều hướng tự động từ HTTP sang HTTPS
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      # QUAN TRỌNG: ArgoCD chạy backend bằng HTTPS/gRPC
+      alb.ingress.kubernetes.io/backend-protocol: HTTPS
     hosts: []
