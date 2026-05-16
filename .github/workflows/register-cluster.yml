@@ -61,11 +61,14 @@ jobs:
       # =========================================================
       # WAIT ARGOCD READY
       # =========================================================
-      - name: Wait ArgoCD Server Ready
+      - name: Wait ArgoCD Ready
         run: |
           kubectl rollout status deployment/argocd-server \
             -n argocd \
             --timeout=600s
+
+          kubectl get pods -n argocd
+          kubectl get svc -n argocd
 
       # =========================================================
       # GET ARGOCD PASSWORD
@@ -78,72 +81,58 @@ jobs:
           echo "ARGO_PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
       # =========================================================
-      # WAIT LOADBALANCER HOSTNAME
+      # LOGIN + REGISTER DEV CLUSTER
       # =========================================================
-      - name: Wait ArgoCD Endpoint Ready
+      - name: Register Dev Cluster
         run: |
-          echo "Waiting for ArgoCD ALB..."
+          set -euo pipefail
 
-          for i in {1..40}; do
-            HOST=$(kubectl get ingress argocd-server \
-              -n argocd \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "Starting ArgoCD port-forward..."
 
-            if [ -n "$HOST" ]; then
-              echo "Hostname found: $HOST"
+          kubectl port-forward svc/argocd-server \
+            -n argocd \
+            --address 127.0.0.1 \
+            8080:443 \
+            > /tmp/argocd-portforward.log 2>&1 &
 
-              # DNS resolve test
-              if nslookup $HOST > /dev/null 2>&1; then
-                echo "DNS resolved successfully"
+          PF_PID=$!
 
-                # HTTP connectivity test
-                if curl -s --max-time 10 http://$HOST >/dev/null; then
-                  echo "ALB reachable"
+          cleanup() {
+            echo "Cleaning up..."
+            kill $PF_PID || true
+          }
 
-                  echo "ARGO_HOST=$HOST" >> $GITHUB_ENV
-                  exit 0
-                fi
+          trap cleanup EXIT
 
-                echo "DNS OK but ALB not reachable yet..."
-              else
-                echo "Hostname exists but DNS not propagated yet..."
-              fi
-            else
-              echo "Ingress hostname not assigned yet..."
+          echo "Waiting for port-forward..."
+
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 8080; then
+              echo "Port-forward established"
+              break
             fi
 
-            sleep 20
+            sleep 5
           done
 
-          echo "ArgoCD endpoint not ready"
-          exit 1
+          echo "===== PORT FORWARD LOG ====="
+          cat /tmp/argocd-portforward.log || true
 
-      # =========================================================
-      # TEST CONNECTIVITY
-      # =========================================================
-      - name: Test ArgoCD Connectivity
-        run: |
-          echo "Testing connection to $ARGO_HOST"
+          echo "Generating auth token..."
 
-          curl -I http://$ARGO_HOST || true
-
-      # =========================================================
-      # LOGIN TO ARGOCD
-      # =========================================================
-      - name: Login ArgoCD
-        run: |
-          argocd login $ARGO_HOST \
-            --username admin \
-            --password "$ARGO_PASSWORD" \
+          ARGO_TOKEN=$(argocd account generate-token \
+            --server 127.0.0.1:8080 \
             --insecure \
             --grpc-web \
-            --plaintext
+            --username admin \
+            --password "$ARGO_PASSWORD")
 
-      # =========================================================
-      # REGISTER DEV CLUSTER
-      # =========================================================
-      - name: Register dev cluster
-        run: |
+          echo "Token generated"
+
+          export ARGOCD_AUTH_TOKEN=$ARGO_TOKEN
+
+          echo "Configure dev kubeconfig..."
+
           aws eks update-kubeconfig \
             --name dev-cluster \
             --region $AWS_REGION \
@@ -151,18 +140,62 @@ jobs:
 
           kubectl config get-contexts
 
+          echo "Register dev cluster..."
+
           argocd cluster add dev-cluster \
             --yes \
+            --server 127.0.0.1:8080 \
+            --auth-token "$ARGOCD_AUTH_TOKEN" \
             --insecure \
-            --grpc-web \
-            --plaintext
+            --grpc-web
+
+          echo "Verify clusters..."
+
+          argocd cluster list \
+            --server 127.0.0.1:8080 \
+            --auth-token "$ARGOCD_AUTH_TOKEN" \
+            --insecure \
+            --grpc-web
 
       # =========================================================
       # OPTIONAL PROD CLUSTER
       # =========================================================
-      - name: Register prod cluster
+      - name: Register Prod Cluster
         continue-on-error: true
         run: |
+          set -euo pipefail
+
+          echo "Starting ArgoCD port-forward..."
+
+          kubectl port-forward svc/argocd-server \
+            -n argocd \
+            --address 127.0.0.1 \
+            8080:443 \
+            > /tmp/argocd-portforward-prod.log 2>&1 &
+
+          PF_PID=$!
+
+          cleanup() {
+            kill $PF_PID || true
+          }
+
+          trap cleanup EXIT
+
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 8080; then
+              echo "Port-forward established"
+              break
+            fi
+
+            sleep 5
+          done
+
+          argocd login 127.0.0.1:8080 \
+            --username admin \
+            --password "$ARGO_PASSWORD" \
+            --insecure \
+            --grpc-web
+
           aws eks update-kubeconfig \
             --name prod-cluster \
             --region $AWS_REGION \
@@ -171,15 +204,46 @@ jobs:
           argocd cluster add prod-cluster \
             --yes \
             --insecure \
-            --grpc-web \
-            --plaintext
+            --grpc-web
 
       # =========================================================
-      # VERIFY REGISTERED CLUSTERS
+      # VERIFY CLUSTERS
       # =========================================================
-      - name: Verify clusters
+      - name: Verify Registered Clusters
         run: |
+          set -euo pipefail
+
+          kubectl port-forward svc/argocd-server \
+            -n argocd \
+            --address 127.0.0.1 \
+            8080:443 \
+            > /tmp/argocd-portforward-verify.log 2>&1 &
+
+          PF_PID=$!
+
+          cleanup() {
+            kill $PF_PID || true
+          }
+
+          trap cleanup EXIT
+
+          for i in {1..30}; do
+            if nc -z 127.0.0.1 8080; then
+              echo "Port-forward established"
+              break
+            fi
+
+            sleep 5
+          done
+
+          argocd login 127.0.0.1:8080 \
+            --username admin \
+            --password "$ARGO_PASSWORD" \
+            --insecure \
+            --grpc-web
+
+          echo "===== REGISTERED CLUSTERS ====="
+
           argocd cluster list \
             --insecure \
-            --grpc-web \
-            --plaintext
+            --grpc-web
