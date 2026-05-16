@@ -15,11 +15,6 @@ module "aws_load_balancer_controller_irsa_role" {
       ]
     }
   }
-  assume_role_condition_test = "StringEquals"
-
-  assume_role_conditions = {
-    "sts.amazonaws.com:aud" = "sts.amazonaws.com"
-  }
 }
 
 module "cluster_autoscaler_irsa_role" {
