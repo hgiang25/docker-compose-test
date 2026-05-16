@@ -137,6 +137,7 @@ jobs:
             --password "$ARGO_PASSWORD" \
             --insecure \
             --grpc-web \
+            --plaintext
 
       # =========================================================
       # REGISTER DEV CLUSTER
@@ -153,7 +154,8 @@ jobs:
           argocd cluster add dev-cluster \
             --yes \
             --insecure \
-            --grpc-web
+            --grpc-web \
+            --plaintext
 
       # =========================================================
       # OPTIONAL PROD CLUSTER
@@ -169,7 +171,8 @@ jobs:
           argocd cluster add prod-cluster \
             --yes \
             --insecure \
-            --grpc-web
+            --grpc-web \
+            --plaintext
 
       # =========================================================
       # VERIFY REGISTERED CLUSTERS
@@ -178,4 +181,5 @@ jobs:
         run: |
           argocd cluster list \
             --insecure \
-            --grpc-web
+            --grpc-web \
+            --plaintext
