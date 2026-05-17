@@ -59,12 +59,12 @@ module "eks_addons" {
   oidc_provider_arn = module.eks.oidc_provider_arn
 
   region = "ap-southeast-1"
-  vpc_id = module.vpc.vpc_id
+  vpc_id  = module.vpc.vpc_id
 
-  metrics_server_version = "3.13.0"
-  argo_rollouts_version  = "2.37.6"
+  metrics_server_version   = "3.13.0"
+  argo_rollouts_version    = "2.37.6"
+  aws_lb_controller_ver    = "1.11.0"
+  cluster_autoscaler_ver   = "9.37.0"
 
-  aws_lb_controller_ver = "1.11.0"
-
-  cluster_autoscaler_ver = "9.37.0"
+  depends_on = [module.eks]
 }
