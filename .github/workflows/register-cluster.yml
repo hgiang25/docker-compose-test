@@ -1,4 +1,4 @@
-name: Register EKS Cluster To ArgoCD
+name: Register EKS Cluster To ArgoCD (Production Grade)
 
 on:
   workflow_dispatch:
@@ -29,22 +29,17 @@ jobs:
           aws-region: ap-southeast-1
 
       # =========================================================
-      # INSTALL KUBECTL
+      # INSTALL TOOLS
       # =========================================================
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
 
-      # =========================================================
-      # INSTALL ARGOCD CLI
-      # =========================================================
       - name: Install ArgoCD CLI
         run: |
           curl -sSL -o argocd \
             https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-
           chmod +x argocd
           sudo mv argocd /usr/local/bin/
-
           argocd version --client
 
       # =========================================================
@@ -59,19 +54,18 @@ jobs:
           kubectl config current-context
 
       # =========================================================
-      # WAIT ARGOCD READY
+      # WAIT ARGOCD FULL READY
       # =========================================================
       - name: Wait ArgoCD Ready
         run: |
           kubectl rollout status deployment/argocd-server \
-            -n argocd \
-            --timeout=600s
+            -n argocd --timeout=600s
 
+          echo "Pods:"
           kubectl get pods -n argocd
-          kubectl get svc -n argocd
 
       # =========================================================
-      # GET ARGOCD PASSWORD
+      # GET ADMIN PASSWORD
       # =========================================================
       - name: Get ArgoCD Password
         run: |
@@ -81,169 +75,83 @@ jobs:
           echo "ARGO_PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
       # =========================================================
-      # LOGIN + REGISTER DEV CLUSTER
+      # START PORT-FORWARD & LOGIN (CRITICAL FIX - RESOLVE ALB ISSUE)
+      # =========================================================
+      - name: Port-Forward & Login ArgoCD
+        run: |
+          echo "Starting secure background port-forward directly to cluster..."
+          # Mở port-forward ngầm (background) tới cổng 8080 của runner
+          kubectl port-forward svc/argocd-server -n argocd 8080:443 > /dev/null 2>&1 &
+
+          # Đợi 5 giây để cổng mạng tunnel sẵn sàng
+          sleep 5
+
+          echo "Logging into ArgoCD via local port-forward..."
+          set +e
+          for i in {1..5}; do
+            # Đi qua localhost:8080 nên không bị chặn hoặc bóp bởi AWS ALB cổng 80
+            argocd login localhost:8080 \
+              --username admin \
+              --password "$ARGO_PASSWORD" \
+              --insecure
+
+            if [ $? -eq 0 ]; then
+              echo "LOGIN SUCCESSFUL VIA PORT-FORWARD"
+              exit 0
+            fi
+
+            echo "Retry local login $i..."
+            sleep 3
+          done
+
+          echo "Local login failed"
+          exit 1
+
+      # =========================================================
+      # REGISTER DEV CLUSTER
       # =========================================================
       - name: Register Dev Cluster
         run: |
-          set -euo pipefail
-
-          echo "Starting ArgoCD port-forward..."
-
-          kubectl port-forward svc/argocd-server \
-            -n argocd \
-            --address 127.0.0.1 \
-            8080:443 \
-            > /tmp/argocd-portforward.log 2>&1 &
-
-          PF_PID=$!
-
-          cleanup() {
-            echo "Cleaning up..."
-            kill $PF_PID || true
-          }
-
-          trap cleanup EXIT
-
-          echo "Waiting for port-forward..."
-
-          for i in {1..30}; do
-            if nc -z 127.0.0.1 8080; then
-              echo "Port-forward established"
-              break
-            fi
-
-            sleep 5
-          done
-
-          echo "===== PORT FORWARD LOG ====="
-          cat /tmp/argocd-portforward.log || true
-
-          echo "Generating auth token..."
-
-          ARGO_TOKEN=$(argocd account generate-token \
-            --server 127.0.0.1:8080 \
-            --insecure \
-            --grpc-web \
-            --username admin \
-            --password "$ARGO_PASSWORD")
-
-          echo "Token generated"
-
-          export ARGOCD_AUTH_TOKEN=$ARGO_TOKEN
-
-          echo "Configure dev kubeconfig..."
-
+          # 1. Tạo ngữ cảnh kubeconfig cho Dev Cluster
           aws eks update-kubeconfig \
             --name dev-cluster \
             --region $AWS_REGION \
             --alias dev-cluster
 
-          kubectl config get-contexts
+          # 2. Chuyển ngữ cảnh hiện tại về lại Management để chạy lệnh add
+          # (Vì lệnh 'argocd cluster add' cần đọc thông tin context của dev-cluster 
+          # nhưng lệnh gọi CLI vẫn phải bắn tới địa chỉ localhost:8080 của management)
+          kubectl config use-context arn:aws:eks:ap-southeast-1:248195880649:cluster/management-cluster
 
-          echo "Register dev cluster..."
-
+          echo "Registering dev-cluster to ArgoCD..."
           argocd cluster add dev-cluster \
             --yes \
-            --server 127.0.0.1:8080 \
-            --auth-token "$ARGOCD_AUTH_TOKEN" \
-            --insecure \
-            --grpc-web
-
-          echo "Verify clusters..."
-
-          argocd cluster list \
-            --server 127.0.0.1:8080 \
-            --auth-token "$ARGOCD_AUTH_TOKEN" \
-            --insecure \
-            --grpc-web
+            --insecure
 
       # =========================================================
-      # OPTIONAL PROD CLUSTER
+      # OPTIONAL PROD
       # =========================================================
       - name: Register Prod Cluster
         continue-on-error: true
         run: |
-          set -euo pipefail
-
-          echo "Starting ArgoCD port-forward..."
-
-          kubectl port-forward svc/argocd-server \
-            -n argocd \
-            --address 127.0.0.1 \
-            8080:443 \
-            > /tmp/argocd-portforward-prod.log 2>&1 &
-
-          PF_PID=$!
-
-          cleanup() {
-            kill $PF_PID || true
-          }
-
-          trap cleanup EXIT
-
-          for i in {1..30}; do
-            if nc -z 127.0.0.1 8080; then
-              echo "Port-forward established"
-              break
-            fi
-
-            sleep 5
-          done
-
-          argocd login 127.0.0.1:8080 \
-            --username admin \
-            --password "$ARGO_PASSWORD" \
-            --insecure \
-            --grpc-web
-
+          # 1. Tạo ngữ cảnh cho Prod Cluster
           aws eks update-kubeconfig \
             --name prod-cluster \
             --region $AWS_REGION \
             --alias prod-cluster
 
+          # 2. Quay về context Management 
+          kubectl config use-context arn:aws:eks:ap-southeast-1:248195880649:cluster/management-cluster
+
+          echo "Registering prod-cluster to ArgoCD..."
           argocd cluster add prod-cluster \
             --yes \
-            --insecure \
-            --grpc-web
+            --insecure
 
       # =========================================================
-      # VERIFY CLUSTERS
+      # FINAL VERIFY
       # =========================================================
-      - name: Verify Registered Clusters
+      - name: Verify Clusters
         run: |
-          set -euo pipefail
-
-          kubectl port-forward svc/argocd-server \
-            -n argocd \
-            --address 127.0.0.1 \
-            8080:443 \
-            > /tmp/argocd-portforward-verify.log 2>&1 &
-
-          PF_PID=$!
-
-          cleanup() {
-            kill $PF_PID || true
-          }
-
-          trap cleanup EXIT
-
-          for i in {1..30}; do
-            if nc -z 127.0.0.1 8080; then
-              echo "Port-forward established"
-              break
-            fi
-
-            sleep 5
-          done
-
-          argocd login 127.0.0.1:8080 \
-            --username admin \
-            --password "$ARGO_PASSWORD" \
-            --insecure \
-            --grpc-web
-
-          echo "===== REGISTERED CLUSTERS ====="
-
-          argocd cluster list \
-            --insecure \
-            --grpc-web
+          echo "FINAL CLUSTER LIST:"
+          argocd cluster list --insecure
