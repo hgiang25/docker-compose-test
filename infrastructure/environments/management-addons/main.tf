@@ -53,7 +53,5 @@ module "eks_addons" {
   cluster_endpoint  = data.terraform_remote_state.management.outputs.cluster_endpoint
   cluster_ca        = data.terraform_remote_state.management.outputs.cluster_ca
   oidc_provider_arn = data.terraform_remote_state.management.outputs.oidc_provider_arn
-
-  region = "ap-southeast-1"
-  vpc_id = "dummy"
+  vpc_id            = data.terraform_remote_state.management.outputs.vpc_id
 }
