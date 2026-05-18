@@ -377,6 +377,6 @@ jobs:
       # -----------------------------------------------------
       - name: Wait Cluster Autoscaler
         run: |
-          kubectl rollout status deployment/cluster-autoscaler \
+          kubectl rollout status deployment/cluster-autoscaler-aws-cluster-autoscaler \
             -n kube-system \
             --timeout=900s
