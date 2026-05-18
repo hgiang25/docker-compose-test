@@ -1,4 +1,6 @@
 module "aws_load_balancer_controller_irsa_role" {
+  count = var.enable_aws_lb_controller ? 1 : 0
+
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = "~> 5.0"
 
@@ -18,6 +20,8 @@ module "aws_load_balancer_controller_irsa_role" {
 }
 
 module "cluster_autoscaler_irsa_role" {
+  count = var.enable_cluster_autoscaler ? 1 : 0
+
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = "~> 5.0"
 
@@ -32,6 +36,7 @@ module "cluster_autoscaler_irsa_role" {
   oidc_providers = {
     main = {
       provider_arn = var.oidc_provider_arn
+
       namespace_service_accounts = [
         "kube-system:cluster-autoscaler"
       ]

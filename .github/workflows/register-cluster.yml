@@ -1,73 +1,114 @@
-name: Register EKS Cluster To ArgoCD (Production Grade)
+name: Register Clusters To ArgoCD
 
 on:
   workflow_dispatch:
 
+env:
+  AWS_REGION: ap-southeast-1
+
+concurrency:
+  group: register-clusters
+  cancel-in-progress: false
+
 jobs:
   register:
-    name: Register Clusters
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ap-southeast-1
+    timeout-minutes: 60
 
     steps:
       # =========================================================
       # CHECKOUT
       # =========================================================
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       # =========================================================
-      # AWS AUTH
+      # KUBECTL
       # =========================================================
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
-          aws-region: ap-southeast-1
+      - uses: azure/setup-kubectl@v4
 
       # =========================================================
-      # INSTALL TOOLS
+      # INSTALL ARGOCD CLI
       # =========================================================
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-
       - name: Install ArgoCD CLI
         run: |
           curl -sSL -o argocd \
             https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+
           chmod +x argocd
+
           sudo mv argocd /usr/local/bin/
+
           argocd version --client
+
+      # =========================================================
+      # AWS LOGIN
+      # =========================================================
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # =========================================================
       # CONNECT MANAGEMENT CLUSTER
       # =========================================================
-      - name: Connect management cluster
+      - name: Connect Management Cluster
         run: |
           aws eks update-kubeconfig \
             --name management-cluster \
             --region $AWS_REGION
 
-          kubectl config current-context
+      # =========================================================
+      # WAIT CLUSTER ACTIVE
+      # =========================================================
+      - name: Wait Cluster Active
+        run: |
+          aws eks wait cluster-active \
+            --name management-cluster \
+            --region $AWS_REGION
 
       # =========================================================
-      # WAIT ARGOCD FULL READY
+      # WAIT NODES READY
       # =========================================================
-      - name: Wait ArgoCD Ready
+      - name: Wait Nodes Ready
+        run: |
+          kubectl wait \
+            --for=condition=Ready nodes \
+            --all \
+            --timeout=900s
+
+      # =========================================================
+      # WAIT ARGOCD SERVER
+      # =========================================================
+      - name: Wait ArgoCD Server
         run: |
           kubectl rollout status deployment/argocd-server \
-            -n argocd --timeout=600s
+            -n argocd \
+            --timeout=900s
 
-          echo "Pods:"
-          kubectl get pods -n argocd
+      # =========================================================
+      # WAIT ARGOCD REPOSERVER
+      # =========================================================
+      - name: Wait ArgoCD RepoServer
+        run: |
+          kubectl rollout status deployment/argocd-repo-server \
+            -n argocd \
+            --timeout=900s
+
+      # =========================================================
+      # WAIT ARGOCD APPLICATION CONTROLLER
+      # =========================================================
+      - name: Wait ArgoCD Application Controller
+        run: |
+          kubectl rollout status statefulset/argocd-application-controller \
+            -n argocd \
+            --timeout=900s
 
       # =========================================================
       # GET ADMIN PASSWORD
       # =========================================================
-      - name: Get ArgoCD Password
+      - name: Get Admin Password
         run: |
           PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret \
             -o jsonpath="{.data.password}" | base64 -d)
@@ -75,83 +116,76 @@ jobs:
           echo "ARGO_PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
       # =========================================================
-      # START PORT-FORWARD & LOGIN (CRITICAL FIX - RESOLVE ALB ISSUE)
+      # START PORT FORWARD
       # =========================================================
-      - name: Port-Forward & Login ArgoCD
+      - name: Start Port Forward
         run: |
-          echo "Starting secure background port-forward directly to cluster..."
-          # Mở port-forward ngầm (background) tới cổng 8080 của runner
-          kubectl port-forward svc/argocd-server -n argocd 8080:443 > /dev/null 2>&1 &
+          nohup kubectl port-forward svc/argocd-server \
+            -n argocd \
+            8080:80 \
+            > /tmp/argocd-portforward.log 2>&1 &
 
-          # Đợi 5 giây để cổng mạng tunnel sẵn sàng
-          sleep 5
+          echo "Waiting port-forward..."
 
-          echo "Logging into ArgoCD via local port-forward..."
-          set +e
-          for i in {1..5}; do
-            # Đi qua localhost:8080 nên không bị chặn hoặc bóp bởi AWS ALB cổng 80
-            argocd login localhost:8080 \
-              --username admin \
-              --password "$ARGO_PASSWORD" \
-              --insecure
+          for i in {1..30}; do
+            nc -z 127.0.0.1 8080 && break
 
-            if [ $? -eq 0 ]; then
-              echo "LOGIN SUCCESSFUL VIA PORT-FORWARD"
-              exit 0
-            fi
-
-            echo "Retry local login $i..."
-            sleep 3
+            sleep 2
           done
 
-          echo "Local login failed"
-          exit 1
+          echo "=== PORT FORWARD LOG ==="
+          cat /tmp/argocd-portforward.log || true
+
+      # =========================================================
+      # TEST HTTP
+      # =========================================================
+      - name: Test ArgoCD Endpoint
+        run: |
+          curl -v http://127.0.0.1:8080/api/version
+
+      # =========================================================
+      # LOGIN ARGOCD
+      # =========================================================
+      - name: Login ArgoCD
+        run: |
+          argocd login 127.0.0.1:8080 \
+            --username admin \
+            --password "$ARGO_PASSWORD" \
+            --insecure \
+            --grpc-web
+
+      # =========================================================
+      # VERIFY LOGIN
+      # =========================================================
+      - name: Verify Login
+        run: |
+          argocd account get-user-info \
+            --grpc-web
+
+      # =========================================================
+      # CONNECT DEV CLUSTER KUBECONFIG
+      # =========================================================
+      - name: Connect Dev Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name dev-cluster \
+            --region $AWS_REGION \
+            --alias dev-cluster
 
       # =========================================================
       # REGISTER DEV CLUSTER
       # =========================================================
       - name: Register Dev Cluster
         run: |
-          # 1. Tạo ngữ cảnh kubeconfig cho Dev Cluster
-          aws eks update-kubeconfig \
-            --name dev-cluster \
-            --region $AWS_REGION \
-            --alias dev-cluster
-
-          # 2. Chuyển ngữ cảnh hiện tại về lại Management để chạy lệnh add
-          # (Vì lệnh 'argocd cluster add' cần đọc thông tin context của dev-cluster 
-          # nhưng lệnh gọi CLI vẫn phải bắn tới địa chỉ localhost:8080 của management)
-          kubectl config use-context arn:aws:eks:ap-southeast-1:248195880649:cluster/management-cluster
-
-          echo "Registering dev-cluster to ArgoCD..."
           argocd cluster add dev-cluster \
             --yes \
-            --insecure
+            --insecure \
+            --grpc-web
 
       # =========================================================
-      # OPTIONAL PROD
-      # =========================================================
-      - name: Register Prod Cluster
-        continue-on-error: true
-        run: |
-          # 1. Tạo ngữ cảnh cho Prod Cluster
-          aws eks update-kubeconfig \
-            --name prod-cluster \
-            --region $AWS_REGION \
-            --alias prod-cluster
-
-          # 2. Quay về context Management 
-          kubectl config use-context arn:aws:eks:ap-southeast-1:248195880649:cluster/management-cluster
-
-          echo "Registering prod-cluster to ArgoCD..."
-          argocd cluster add prod-cluster \
-            --yes \
-            --insecure
-
-      # =========================================================
-      # FINAL VERIFY
+      # VERIFY CLUSTERS
       # =========================================================
       - name: Verify Clusters
         run: |
-          echo "FINAL CLUSTER LIST:"
-          argocd cluster list --insecure
+          argocd cluster list \
+            --grpc-web

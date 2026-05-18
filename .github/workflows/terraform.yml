@@ -1,22 +1,21 @@
-name: Terraform Deploy
+name: Terraform Infrastructure Deploy
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "infrastructure/**"
-
   workflow_dispatch:
 
 env:
   AWS_REGION: ap-southeast-1
+
+concurrency:
+  group: terraform-infra
+  cancel-in-progress: false
 
 jobs:
   # =========================================================
   # MANAGEMENT INFRA
   # =========================================================
   management-infra:
-    name: Deploy Management Infra
+    name: Management Infra
     runs-on: ubuntu-latest
 
     defaults:
@@ -24,57 +23,70 @@ jobs:
         working-directory: infrastructure/environments/management-infra
 
     steps:
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # =====================================================
-      # TERRAFORM
-      # =====================================================
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
 
-      # =====================================================
-      # AWS AUTH
-      # =====================================================
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: azure/setup-kubectl@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # =====================================================
-      # INIT
-      # =====================================================
-      - name: Terraform Init
-        run: terraform init
+      - run: terraform init
 
-      # =====================================================
-      # VALIDATE
-      # =====================================================
-      - name: Terraform Validate
-        run: terraform validate
+      - run: terraform validate
 
-      # =====================================================
-      # PLAN
-      # =====================================================
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
+      - run: terraform plan -out=tfplan
 
-      # =====================================================
-      # APPLY
-      # =====================================================
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+      - run: terraform apply -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # WAIT CLUSTER ACTIVE
+      # -----------------------------------------------------
+      - name: Wait Cluster Active
+        run: |
+          aws eks wait cluster-active \
+            --name management-cluster \
+            --region $AWS_REGION
+
+      # -----------------------------------------------------
+      # CONNECT CLUSTER
+      # -----------------------------------------------------
+      - name: Connect Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name management-cluster \
+            --region $AWS_REGION
+
+      # -----------------------------------------------------
+      # WAIT NODES READY
+      # -----------------------------------------------------
+      - name: Wait Nodes Ready
+        run: |
+          kubectl wait \
+            --for=condition=Ready nodes \
+            --all \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # WAIT COREDNS
+      # -----------------------------------------------------
+      - name: Wait CoreDNS
+        run: |
+          kubectl rollout status deployment/coredns \
+            -n kube-system \
+            --timeout=900s
+
   # =========================================================
   # MANAGEMENT ADDONS
   # =========================================================
   management-addons:
-    name: Deploy Management Addons
+    name: Management Addons
     runs-on: ubuntu-latest
+
     needs: management-infra
 
     defaults:
@@ -86,187 +98,285 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
 
+      - uses: azure/setup-kubectl@v4
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
-          aws-region: ap-southeast-1
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name management-cluster \
+            --region $AWS_REGION
 
       - run: terraform init
+
+      - run: terraform validate
+
       - run: terraform plan -out=tfplan
+
       - run: terraform apply -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # WAIT AWS LOAD BALANCER CONTROLLER
+      # -----------------------------------------------------
+      - name: Wait AWS Load Balancer Controller
+        run: |
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            -n kube-system \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # VERIFY WEBHOOK
+      # -----------------------------------------------------
+      - name: Verify AWS LB Webhook
+        run: |
+          kubectl get validatingwebhookconfigurations
+          kubectl get mutatingwebhookconfigurations
+
+      - name: Wait AWS LB Webhook Endpoint
+        run: |
+          kubectl wait \
+            --for=condition=available \
+            deployment/aws-load-balancer-controller \
+            -n kube-system \
+            --timeout=900s
+
+          sleep 60
 
   # =========================================================
   # MANAGEMENT ARGOCD
   # =========================================================
   management-argocd:
-    name: Deploy ArgoCD
+    name: Management ArgoCD
     runs-on: ubuntu-latest
 
-    needs: management-infra
+    needs: management-addons
 
     defaults:
       run:
         working-directory: infrastructure/environments/management-argocd
 
     steps:
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # =====================================================
-      # TERRAFORM
-      # =====================================================
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
 
-      # =====================================================
-      # AWS AUTH
-      # =====================================================
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: azure/setup-kubectl@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # =====================================================
-      # WAIT EKS API READY
-      # =====================================================
-      - name: Wait for EKS API
+      - name: Connect Cluster
         run: |
-          echo "Waiting EKS API..."
+          aws eks update-kubeconfig \
+            --name management-cluster \
+            --region $AWS_REGION
 
-          for i in {1..30}; do
-            STATUS=$(aws eks describe-cluster \
-              --name management-cluster \
-              --region $AWS_REGION \
-              --query "cluster.status" \
-              --output text || true)
+      - run: terraform init
 
-            echo "Current status: $STATUS"
+      - run: terraform validate
 
-            if [ "$STATUS" = "ACTIVE" ]; then
-              echo "EKS cluster ready"
+      - run: terraform plan -out=tfplan
+
+      - run: terraform apply -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # WAIT ARGOCD SERVER
+      # -----------------------------------------------------
+      - name: Wait ArgoCD Server
+        run: |
+          kubectl rollout status deployment/argocd-server \
+            -n argocd \
+            --timeout=900s
+
+      - name: Wait ArgoCD Ingress Address
+        run: |
+          for i in {1..60}; do
+
+            HOST=$(kubectl get ingress argocd-server \
+              -n argocd \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+            if [ ! -z "$HOST" ]; then
+              echo "Ingress ready: $HOST"
               exit 0
             fi
 
-            sleep 30
+            echo "Waiting ingress..."
+            sleep 10
           done
 
-          echo "EKS cluster not ready"
+          echo "Ingress not ready"
           exit 1
 
-      # =====================================================
-      # INIT
-      # =====================================================
-      - name: Terraform Init
-        run: terraform init
+      # -----------------------------------------------------
+      # WAIT REPO SERVER
+      # -----------------------------------------------------
+      - name: Wait ArgoCD Repo Server
+        run: |
+          kubectl rollout status deployment/argocd-repo-server \
+            -n argocd \
+            --timeout=900s
 
-      # =====================================================
-      # VALIDATE
-      # =====================================================
-      - name: Terraform Validate
-        run: terraform validate
+      # -----------------------------------------------------
+      # WAIT APPLICATION CONTROLLER
+      # -----------------------------------------------------
+      - name: Wait ArgoCD Application Controller
+        run: |
+          kubectl rollout status statefulset/argocd-application-controller \
+            -n argocd \
+            --timeout=900s
 
-      # =====================================================
-      # PLAN
-      # =====================================================
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
-
-      # =====================================================
-      # APPLY
-      # =====================================================
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+      # -----------------------------------------------------
+      # WAIT REDIS
+      # -----------------------------------------------------
+      - name: Wait ArgoCD Redis
+        run: |
+          kubectl rollout status deployment/argocd-redis \
+            -n argocd \
+            --timeout=900s
 
   # =========================================================
   # DEV INFRA
   # =========================================================
   dev-infra:
-    name: Deploy Dev Infra
+    name: Dev Infra
     runs-on: ubuntu-latest
 
     needs: management-argocd
 
     defaults:
       run:
-        working-directory: infrastructure/environments/dev
+        working-directory: infrastructure/environments/dev_infra
 
     steps:
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # =====================================================
-      # TERRAFORM
-      # =====================================================
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
 
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@v4
 
-      # =====================================================
-      # AWS AUTH
-      # =====================================================
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # =====================================================
-      # WAIT DEV NODES READY
-      # =====================================================
-      - name: Wait for dev nodes ready
-        run: |
-          echo "Waiting for EKS nodes..."
+      - run: terraform init
 
+      - run: terraform validate
+
+      - run: terraform plan -out=tfplan
+
+      - run: terraform apply -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # WAIT CLUSTER ACTIVE
+      # -----------------------------------------------------
+      - name: Wait Cluster Active
+        run: |
+          aws eks wait cluster-active \
+            --name dev-cluster \
+            --region $AWS_REGION
+
+      # -----------------------------------------------------
+      # CONNECT DEV CLUSTER
+      # -----------------------------------------------------
+      - name: Connect Dev Cluster
+        run: |
           aws eks update-kubeconfig \
             --name dev-cluster \
             --region $AWS_REGION
 
+      # -----------------------------------------------------
+      # WAIT NODES
+      # -----------------------------------------------------
+      - name: Wait Nodes Ready
+        run: |
           kubectl wait \
             --for=condition=Ready nodes \
             --all \
-            --timeout=600s
+            --timeout=900s
 
-      # =====================================================
-      # WAIT COREDNS READY
-      # =====================================================
-      - name: Wait for CoreDNS
+      # -----------------------------------------------------
+      # WAIT COREDNS
+      # -----------------------------------------------------
+      - name: Wait CoreDNS
         run: |
           kubectl rollout status deployment/coredns \
             -n kube-system \
-            --timeout=600s
+            --timeout=900s
 
-      # =====================================================
-      # INIT
-      # =====================================================
-      - name: Terraform Init
-        run: terraform init
+  # =========================================================
+  # DEV ADDONS
+  # =========================================================
+  dev-addons:
+    name: Dev Addons
+    runs-on: ubuntu-latest
 
-      # =====================================================
-      # VALIDATE
-      # =====================================================
-      - name: Terraform Validate
-        run: terraform validate
+    needs: dev-infra
 
-      # =====================================================
-      # PLAN
-      # =====================================================
-      - name: Terraform Plan
-        run: terraform plan -out=tfplan
+    defaults:
+      run:
+        working-directory: infrastructure/environments/dev-addons
 
-      # =====================================================
-      # APPLY
-      # =====================================================
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-kubectl@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect Dev Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name dev-cluster \
+            --region $AWS_REGION
+
+      - run: terraform init
+
+      - run: terraform validate
+
+      - run: terraform plan -out=tfplan
+
+      - run: terraform apply -auto-approve tfplan
+
+      # -----------------------------------------------------
+      # WAIT METRICS SERVER
+      # -----------------------------------------------------
+      - name: Wait Metrics Server
+        run: |
+          kubectl rollout status deployment/metrics-server \
+            -n kube-system \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # WAIT ARGO ROLLOUTS
+      # -----------------------------------------------------
+      - name: Wait Argo Rollouts
+        run: |
+          kubectl rollout status deployment/argo-rollouts \
+            -n argo-rollouts \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # WAIT CLUSTER AUTOSCALER
+      # -----------------------------------------------------
+      - name: Wait Cluster Autoscaler
+        run: |
+          kubectl rollout status deployment/cluster-autoscaler \
+            -n kube-system \
+            --timeout=900s

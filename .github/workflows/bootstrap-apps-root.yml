@@ -1,17 +1,19 @@
-name: Bootstrap GitOps Apps
+name: Bootstrap GitOps Root Apps
 
 on:
   workflow_dispatch:
 
-jobs:
-  bootstrap-apps:
-    runs-on: ubuntu-latest
+env:
+  AWS_REGION: ap-southeast-1
 
-    env:
-      AWS_REGION: ap-southeast-1
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -19,21 +21,53 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - uses: azure/setup-kubectl@v4
-
-      - name: Connect cluster
+      # -----------------------------------------------------
+      # CONNECT CLUSTER
+      # -----------------------------------------------------
+      - name: Connect Cluster
         run: |
           aws eks update-kubeconfig \
             --name management-cluster \
             --region $AWS_REGION
 
-      - name: Wait ArgoCD
+      # -----------------------------------------------------
+      # WAIT ARGOCD SERVER
+      # -----------------------------------------------------
+      - name: Wait ArgoCD Server
         run: |
           kubectl rollout status deployment/argocd-server \
             -n argocd \
-            --timeout=600s
+            --timeout=900s
 
-      - name: Apply App Of Apps
+      # -----------------------------------------------------
+      # WAIT REPO SERVER
+      # -----------------------------------------------------
+      - name: Wait Repo Server
+        run: |
+          kubectl rollout status deployment/argocd-repo-server \
+            -n argocd \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # WAIT APPLICATION CONTROLLER
+      # -----------------------------------------------------
+      - name: Wait Application Controller
+        run: |
+          kubectl rollout status statefulset/argocd-application-controller \
+            -n argocd \
+            --timeout=900s
+
+      # -----------------------------------------------------
+      # APPLY ROOT APP
+      # -----------------------------------------------------
+      - name: Apply Root App
         run: |
           kubectl apply \
             -f infrastructure/modules/argocd/app-of-apps.yaml
+
+      # -----------------------------------------------------
+      # VERIFY
+      # -----------------------------------------------------
+      - name: Verify
+        run: |
+          kubectl get applications -n argocd

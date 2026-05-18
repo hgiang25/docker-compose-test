@@ -19,13 +19,13 @@ terraform {
       source  = "hashicorp/time"
       version = "~> 0.11"
     }
-
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.2"
-    }
   }
 }
 
-variable "cluster_name" {}
-variable "oidc_provider_arn" {}
+variable "cluster_name" {
+  type = string
+}
+
+variable "oidc_provider_arn" {
+  type = string
+}

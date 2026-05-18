@@ -29,21 +29,5 @@ resource "helm_release" "argocd" {
   force_update    = true
   recreate_pods   = true
   cleanup_on_fail = true
-}
-
-# Giữ lại phần Wait cho ArgoCD Server Ready
-resource "time_sleep" "wait_argocd" {
-  depends_on = [
-    helm_release.argocd
-  ]
-
-  create_duration = "180s"
-}
-
-resource "time_sleep" "wait_alb_controller" {
-  depends_on = [
-    helm_release.argocd
-  ]
-
-  create_duration = "180s"
+  atomic = true
 }
