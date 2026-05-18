@@ -1,8 +1,10 @@
 server:
   extraArgs:
     - --insecure
+
   service:
     type: ClusterIP
+    port: 80
 
   ingress:
     enabled: true
@@ -12,10 +14,11 @@ server:
       alb.ingress.kubernetes.io/scheme: internet-facing
       alb.ingress.kubernetes.io/target-type: ip
 
+      # 🔥 QUAN TRỌNG: route đúng port service
+      alb.ingress.kubernetes.io/backend-protocol: HTTP
+      alb.ingress.kubernetes.io/backend-port: "80"
+
       alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
 
-      alb.ingress.kubernetes.io/backend-protocol: HTTP
-
-      alb.ingress.kubernetes.io/healthcheck-path: /healthz
-
-    hosts: []
+      alb.ingress.kubernetes.io/healthcheck-path: /
+      alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"

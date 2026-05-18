@@ -126,4 +126,8 @@ resource "helm_release" "aws_lb_controller" {
     name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = module.aws_load_balancer_controller_irsa_role[0].iam_role_arn
   }
+  set {
+    name  = "enableServiceMutatorWebhook"
+    value = "true"
+  }
 }

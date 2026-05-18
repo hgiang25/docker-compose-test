@@ -13,7 +13,6 @@ concurrency:
 jobs:
   register:
     runs-on: ubuntu-latest
-
     timeout-minutes: 60
 
     steps:
@@ -36,7 +35,6 @@ jobs:
             https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
 
           chmod +x argocd
-
           sudo mv argocd /usr/local/bin/
 
           argocd version --client
@@ -97,7 +95,7 @@ jobs:
             --timeout=900s
 
       # =========================================================
-      # WAIT ARGOCD APPLICATION CONTROLLER
+      # WAIT ARGOCD CONTROLLER
       # =========================================================
       - name: Wait ArgoCD Application Controller
         run: |
@@ -116,54 +114,55 @@ jobs:
           echo "ARGO_PASSWORD=$PASSWORD" >> $GITHUB_ENV
 
       # =========================================================
-      # START PORT FORWARD
+      # GET ARGOCD INGRESS HOST
       # =========================================================
-      - name: Start Port Forward
+      - name: Get ArgoCD Ingress Host
         run: |
-          nohup kubectl port-forward svc/argocd-server \
-            -n argocd \
-            8080:80 \
-            > /tmp/argocd-portforward.log 2>&1 &
+          for i in {1..60}; do
+            ARGO_HOST=$(kubectl get ingress argocd-server \
+              -n argocd \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
-          echo "Waiting port-forward..."
+            if [ ! -z "$ARGO_HOST" ]; then
+              echo "ARGO_HOST=$ARGO_HOST" >> $GITHUB_ENV
+              echo "Ingress ready: $ARGO_HOST"
+              exit 0
+            fi
 
-          for i in {1..30}; do
-            nc -z 127.0.0.1 8080 && break
-
-            sleep 2
+            echo "Waiting ingress..."
+            sleep 10
           done
 
-          echo "=== PORT FORWARD LOG ==="
-          cat /tmp/argocd-portforward.log || true
+          echo "Ingress not ready"
+          exit 1
 
       # =========================================================
-      # TEST HTTP
-      # =========================================================
-      - name: Test ArgoCD Endpoint
-        run: |
-          curl -v http://127.0.0.1:8080/api/version
-
-      # =========================================================
-      # LOGIN ARGOCD
+      # LOGIN ARGOCD (NO PORT-FORWARD)
       # =========================================================
       - name: Login ArgoCD
         run: |
-          argocd login 127.0.0.1:8080 \
+          set -euo pipefail
+
+          echo "ArgoCD Host: $ARGO_HOST"
+
+          echo "Testing endpoint..."
+          curl -s http://$ARGO_HOST/api/version
+
+          echo "Logging into ArgoCD..."
+
+          argocd login $ARGO_HOST \
             --username admin \
             --password "$ARGO_PASSWORD" \
-            --insecure \
-            --grpc-web
+            --grpc-web \
+            --plaintext
 
-      # =========================================================
-      # VERIFY LOGIN
-      # =========================================================
-      - name: Verify Login
-        run: |
+          echo "Verify login..."
           argocd account get-user-info \
-            --grpc-web
+            --grpc-web \
+            --plaintext
 
       # =========================================================
-      # CONNECT DEV CLUSTER KUBECONFIG
+      # CONNECT DEV CLUSTER
       # =========================================================
       - name: Connect Dev Cluster
         run: |
@@ -179,8 +178,8 @@ jobs:
         run: |
           argocd cluster add dev-cluster \
             --yes \
-            --insecure \
-            --grpc-web
+            --grpc-web \
+            --plaintext
 
       # =========================================================
       # VERIFY CLUSTERS
@@ -188,4 +187,5 @@ jobs:
       - name: Verify Clusters
         run: |
           argocd cluster list \
-            --grpc-web
+            --grpc-web \
+            --plaintext
