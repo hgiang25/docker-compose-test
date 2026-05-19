@@ -25,9 +25,9 @@ resource "helm_release" "argocd" {
   ]
 
   timeout         = 1200
-  wait            = true
+  wait            = false
   force_update    = true
   recreate_pods   = true
-  cleanup_on_fail = true
-  atomic = true
+  cleanup_on_fail = false
+  atomic = false
 }

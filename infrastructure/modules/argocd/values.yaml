@@ -22,3 +22,41 @@ server:
 
       alb.ingress.kubernetes.io/healthcheck-path: /
       alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"
+
+configs:
+  cm:
+    exec.enabled: "true"
+
+repoServer:
+  env:
+    - name: AWS_REGION
+      value: ap-southeast-1
+
+  initContainers:
+    - name: install-aws-cli
+
+      image: amazonlinux:2023
+
+      command:
+        - sh
+        - -c
+
+      args:
+        - |
+          yum install -y unzip curl
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install --bin-dir /custom-bin --install-dir /custom-aws-cli
+
+      volumeMounts:
+        - mountPath: /custom-bin
+          name: custom-tools
+
+  volumeMounts:
+    - mountPath: /usr/local/bin/aws
+      name: custom-tools
+      subPath: aws
+
+  volumes:
+    - name: custom-tools
+      emptyDir: {}

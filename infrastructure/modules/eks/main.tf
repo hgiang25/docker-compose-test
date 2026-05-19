@@ -18,7 +18,7 @@ module "eks" {
   cluster_endpoint_private_access = true
 
   # Bootstrap admin cluster creator
-  # enable_cluster_creator_admin_permissions = true
+  #enable_cluster_creator_admin_permissions = true
 
   #enable_ebs_csi_driver = true  
 
