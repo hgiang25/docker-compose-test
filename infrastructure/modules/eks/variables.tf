@@ -13,3 +13,8 @@ variable "private_subnet_ids" {
 variable "enviroment" {
   type = string
 }
+
+variable "argocd_role_arn" {
+  type    = string
+  default = ""
+}

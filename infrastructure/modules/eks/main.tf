@@ -163,3 +163,28 @@ resource "aws_eks_access_policy_association" "admin" {
     aws_eks_access_entry.admin
   ]
 }
+
+resource "aws_eks_access_entry" "argocd" {
+  count = var.argocd_role_arn != "" ? 1 : 0
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = var.argocd_role_arn
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "argocd" {
+  count = var.argocd_role_arn != "" ? 1 : 0
+
+  cluster_name  = module.eks.cluster_name
+  principal_arn = var.argocd_role_arn
+
+  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [
+    aws_eks_access_entry.argocd
+  ]
+}

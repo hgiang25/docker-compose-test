@@ -54,5 +54,7 @@ module "eks" {
   private_subnet_ids = module.vpc.private_subnet_ids
 
   enviroment = "dev"
+
+  argocd_role_arn = "arn:aws:iam::248195880649:role/management-cluster-argocd-controller"
 }
 
