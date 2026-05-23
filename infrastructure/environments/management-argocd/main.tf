@@ -103,6 +103,12 @@ module "argocd_clusters" {
       ca_data = data.terraform_remote_state.dev.outputs.cluster_ca
 
       region = "ap-southeast-1"
+
+      role_arn = module.argocd.argocd_management_role_arn
     }
   }
+
+  depends_on = [
+    module.argocd
+  ]
 }

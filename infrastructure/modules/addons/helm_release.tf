@@ -78,6 +78,9 @@ resource "helm_release" "addons" {
       value = set.value
     }
   }
+  depends_on = [
+    module.cluster_autoscaler_irsa_role
+  ]
 }
 
 resource "helm_release" "aws_lb_controller" {
@@ -130,4 +133,7 @@ resource "helm_release" "aws_lb_controller" {
     name  = "enableServiceMutatorWebhook"
     value = "true"
   }
+  depends_on = [
+    module.aws_load_balancer_controller_irsa_role
+  ]
 }

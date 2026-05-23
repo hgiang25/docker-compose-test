@@ -4,5 +4,6 @@ variable "clusters" {
     server       = string
     ca_data      = string
     region       = string
+    role_arn     = string
   }))
 }

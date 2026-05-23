@@ -57,7 +57,7 @@ module "eks" {
       max_size     = 3
       min_size     = 1
 
-      instance_types = ["c7i-flex.large"]
+      instance_types = ["t3.small"]
 
       subnet_ids = var.private_subnet_ids
 

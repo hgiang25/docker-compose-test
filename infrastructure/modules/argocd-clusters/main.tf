@@ -18,19 +18,9 @@ resource "kubernetes_secret" "cluster" {
     server = base64encode(each.value.server)
 
     config = base64encode(jsonencode({
-      execProviderConfig = {
-        command = "aws"
-
-        args = [
-          "eks",
-          "get-token",
-          "--cluster-name",
-          each.value.cluster_name,
-          "--region",
-          each.value.region
-        ]
-
-        apiVersion = "client.authentication.k8s.io/v1beta1"
+      awsAuthConfig = {
+        clusterName = each.value.cluster_name
+        roleARN     = each.value.role_arn
       }
 
       tlsClientConfig = {
