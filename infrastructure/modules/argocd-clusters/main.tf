@@ -13,11 +13,11 @@ resource "kubernetes_secret" "cluster" {
   type = "Opaque"
 
   data = {
-    name   = base64encode(each.key)
+    name = each.key
 
-    server = base64encode(each.value.server)
+    server = each.value.server
 
-    config = base64encode(jsonencode({
+    config = jsonencode({
       awsAuthConfig = {
         clusterName = each.value.cluster_name
         roleARN     = each.value.role_arn
@@ -27,6 +27,6 @@ resource "kubernetes_secret" "cluster" {
         insecure = false
         caData   = each.value.ca_data
       }
-    }))
+    })
   }
 }
