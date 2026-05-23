@@ -1,4 +1,8 @@
 server:
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: ${ARGOCD_IRSA_ROLE_ARN}
   extraArgs:
     - --insecure
 

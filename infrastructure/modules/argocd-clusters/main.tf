@@ -14,13 +14,12 @@ resource "kubernetes_secret" "cluster" {
 
   data = {
     name = each.key
-
     server = each.value.server
 
     config = jsonencode({
       awsAuthConfig = {
         clusterName = each.value.cluster_name
-        roleARN     = each.value.role_arn
+        # Xóa dòng roleARN = each.value.role_arn đi
       }
 
       tlsClientConfig = {
