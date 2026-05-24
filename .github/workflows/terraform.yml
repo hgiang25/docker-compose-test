@@ -156,7 +156,6 @@ jobs:
 
     needs:
       - management-addons
-      - dev-addons
 
     defaults:
       run:
@@ -252,7 +251,7 @@ jobs:
     name: Dev Infra
     runs-on: ubuntu-latest
 
-    needs: management-addons
+    needs: management-argocd
 
     defaults:
       run:
@@ -382,3 +381,44 @@ jobs:
           kubectl rollout status deployment/cluster-autoscaler-aws-cluster-autoscaler \
             -n kube-system \
             --timeout=900s
+
+  # =========================================================
+  # MANAGEMENT ARGOCD CLUSTERS
+  # =========================================================
+  management-argocd-clusters:
+    name: Management ArgoCD Clusters
+    runs-on: ubuntu-latest
+
+    needs:
+      - dev-addons
+
+    defaults:
+      run:
+        working-directory: infrastructure/environments/management-argocd-clusters
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: azure/setup-kubectl@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Connect Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name management-cluster \
+            --region $AWS_REGION
+
+      - run: terraform init
+
+      - run: terraform validate
+
+      - run: terraform plan -out=tfplan
+
+      - run: terraform apply -auto-approve tfplan

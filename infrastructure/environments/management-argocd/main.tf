@@ -71,44 +71,7 @@ module "argocd" {
     kubernetes = kubernetes
     helm       = helm
   }
-}
-
-data "terraform_remote_state" "dev" {
-  backend = "s3"
-
-  config = {
-    bucket = "terraform-state-voting-app-123456"
-    key    = "dev_infra/terraform.tfstate"
-    region = "ap-southeast-1"
-  }
-}
-
-data "aws_eks_cluster_auth" "dev" {
-  name = data.terraform_remote_state.dev.outputs.cluster_name
-}
-
-module "argocd_clusters" {
-  source = "../../modules/argocd-clusters"
-
-  providers = {
-    kubernetes = kubernetes
-  }
-
-  clusters = {
-    dev-cluster = {
-      cluster_name = data.terraform_remote_state.dev.outputs.cluster_name
-
-      server = data.terraform_remote_state.dev.outputs.cluster_endpoint
-
-      ca_data = data.terraform_remote_state.dev.outputs.cluster_ca
-
-      region = "ap-southeast-1"
-
-      role_arn = module.argocd.argocd_management_role_arn
-    }
-  }
-
   depends_on = [
-    module.argocd
+    data.terraform_remote_state.management
   ]
 }

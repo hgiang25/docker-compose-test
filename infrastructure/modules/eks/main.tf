@@ -151,6 +151,10 @@ resource "aws_eks_access_entry" "admin" {
   cluster_name  = module.eks.cluster_name
   principal_arn = "arn:aws:iam::248195880649:user/hgiang2352"
   type          = "STANDARD"
+
+    depends_on = [
+    module.eks
+  ]
 }
 
 resource "aws_eks_access_policy_association" "admin" {
@@ -174,6 +178,10 @@ resource "aws_eks_access_entry" "argocd" {
   cluster_name  = module.eks.cluster_name
   principal_arn = var.argocd_role_arn
   type          = "STANDARD"
+
+  depends_on = [
+    module.eks
+  ]
 }
 
 resource "aws_eks_access_policy_association" "argocd" {
