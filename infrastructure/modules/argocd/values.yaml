@@ -3,26 +3,13 @@ server:
     create: true
     annotations:
       eks.amazonaws.com/role-arn: ${ARGOCD_IRSA_ROLE_ARN}
+
   extraArgs:
     - --insecure
 
   service:
-    type: ClusterIP
+    type: LoadBalancer
     port: 80
-
-  ingress:
-    enabled: true
-    ingressClassName: alb
-
-    annotations:
-      alb.ingress.kubernetes.io/scheme: internet-facing
-      alb.ingress.kubernetes.io/target-type: ip
-      alb.ingress.kubernetes.io/backend-protocol: HTTP
-      alb.ingress.kubernetes.io/backend-port: traffic-port
-      alb.ingress.kubernetes.io/success-codes: "200,301,302"
-      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
-      alb.ingress.kubernetes.io/healthcheck-path: /
-      alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"
 
 configs:
   cm:

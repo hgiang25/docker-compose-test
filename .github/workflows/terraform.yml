@@ -120,33 +120,6 @@ jobs:
 
       - run: terraform apply -auto-approve tfplan
 
-      # -----------------------------------------------------
-      # WAIT AWS LOAD BALANCER CONTROLLER
-      # -----------------------------------------------------
-      - name: Wait AWS Load Balancer Controller
-        run: |
-          kubectl rollout status deployment/aws-load-balancer-controller \
-            -n kube-system \
-            --timeout=900s
-
-      # -----------------------------------------------------
-      # VERIFY WEBHOOK
-      # -----------------------------------------------------
-      - name: Verify AWS LB Webhook
-        run: |
-          kubectl get validatingwebhookconfigurations
-          kubectl get mutatingwebhookconfigurations
-
-      - name: Wait AWS LB Webhook Endpoint
-        run: |
-          kubectl wait \
-            --for=condition=available \
-            deployment/aws-load-balancer-controller \
-            -n kube-system \
-            --timeout=900s
-
-          sleep 60
-
   # =========================================================
   # MANAGEMENT ARGOCD
   # =========================================================
@@ -197,24 +170,27 @@ jobs:
             -n argocd \
             --timeout=900s
 
-      - name: Wait ArgoCD Ingress Address
+      # -----------------------------------------------------
+      # WAIT ARGOCD LOADBALANCER
+      # -----------------------------------------------------
+      - name: Wait ArgoCD LoadBalancer
         run: |
           for i in {1..60}; do
 
-            HOST=$(kubectl get ingress argocd-server \
+            HOST=$(kubectl get svc argocd-server \
               -n argocd \
               -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
             if [ ! -z "$HOST" ]; then
-              echo "Ingress ready: $HOST"
+              echo "LoadBalancer ready: $HOST"
               exit 0
             fi
 
-            echo "Waiting ingress..."
+            echo "Waiting LoadBalancer..."
             sleep 10
           done
 
-          echo "Ingress not ready"
+          echo "LoadBalancer not ready"
           exit 1
 
       # -----------------------------------------------------

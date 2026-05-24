@@ -72,10 +72,9 @@ module "addons" {
   enable_metrics_server      = false
   enable_argo_rollouts       = false
   enable_cluster_autoscaler  = false
-  enable_aws_lb_controller   = true
 
   metrics_server_version = "3.13.0"
   argo_rollouts_version  = "2.37.6"
-  aws_lb_controller_ver  = "1.11.0"
+
   cluster_autoscaler_ver = "9.37.0"
 }
