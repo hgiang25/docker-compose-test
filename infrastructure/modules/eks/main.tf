@@ -10,10 +10,8 @@ module "eks" {
   vpc_id     = var.vpc_id
   subnet_ids = var.private_subnet_ids
 
-  # IRSA cho service account
   enable_irsa = true
 
-  # Cho phép endpoint public/private
   cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
 
@@ -21,66 +19,101 @@ module "eks" {
     "0.0.0.0/0"
   ]
 
-  # Bootstrap admin cluster creator
-  #enable_cluster_creator_admin_permissions = true
-
-  #enable_ebs_csi_driver = true  
-
   cluster_addons = {
+
     coredns = {
       most_recent = true
+
+      configuration_values = jsonencode({
+        replicaCount = 2
+      })
     }
+
     kube-proxy = {
       most_recent = true
     }
-    
-    # 🔥 THÊM/SỬA BLOCK NÀY ĐỂ TĂNG SỐ LƯỢNG POD CHO T3.MICRO
+
     vpc-cni = {
       most_recent    = true
       before_compute = true
+
       configuration_values = jsonencode({
         env = {
-          ENABLE_PREFIX_DELEGATION = "true"
-          WARM_PREFIX_TARGET       = "1"
-          MINIMUM_IP_TARGET        = "2"
+
+          ENABLE_PREFIX_DELEGATION = "false"
+
+          WARM_PREFIX_TARGET = "1"
+
+          MINIMUM_IP_TARGET = "8"
+
+          WARM_IP_TARGET = "2"
+
+          AWS_VPC_K8S_CNI_EXTERNALSNAT = "false"
+
+          ENABLE_POD_ENI = "false"
+
+          AWS_VPC_ENI_MTU = "9001"
         }
       })
     }
-    
+
     aws-ebs-csi-driver = {
-      most_recent = true
+      most_recent             = true
       service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
-      depends_on = [module.ebs_csi_irsa_role]
+
+      depends_on = [
+        module.ebs_csi_irsa_role
+      ]
     }
   }
 
-  # Node group
   eks_managed_node_groups = {
+
     default = {
-      desired_size = 2
-      max_size     = 3
-      min_size     = 1
 
-      instance_types = ["t3.small"]
+      desired_size = 3
+      min_size     = 3
+      max_size     = 5
 
-      subnet_ids = var.private_subnet_ids
+      instance_types = [
+        "c7i-flex.large"
+      ]
+
+      capacity_type = "ON_DEMAND"
+
+      subnet_ids = var.private_subnet_ids      
+
+      disk_size = 30
+
+      update_config = {
+        max_unavailable = 1
+      }
+
+      labels = {
+        role = "general"
+      }
+
+      taints = []
 
       iam_role_additional_policies = {
+
         AmazonEC2ContainerRegistryReadOnly = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 
         AmazonEBSCSIDriverPolicy = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
       }
+
       tags = {
+
         "k8s.io/cluster-autoscaler/enabled" = "true"
+
         "k8s.io/cluster-autoscaler/${var.cluster_name}" = "owned"
-      }      
+      }
     }
   }
 
-  # Tags
   tags = {
     Project     = "voting-app"
-    Enviroment = var.enviroment
+    Enviroment  = var.enviroment
     ManagedBy   = "Terraform"
   }
 }
