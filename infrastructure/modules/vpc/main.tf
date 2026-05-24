@@ -1,8 +1,8 @@
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
-  
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+
+  enable_dns_support   = var.enable_dns_support
+  enable_dns_hostnames = var.enable_dns_hostnames
 
   tags = {
     Name = "${var.environment}-vpc"
@@ -21,7 +21,7 @@ resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnets[count.index]
   availability_zone       = var.azs[count.index]
-  map_public_ip_on_launch = true
+  map_public_ip_on_launch = var.map_public_ip_on_launch
 
   tags = {
     Name = "${var.environment}-public-${count.index}"
@@ -107,8 +107,8 @@ resource "aws_security_group" "vpce" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port   = 443
-    to_port     = 443
+    from_port   = var.vpce_ingress_port
+    to_port     = var.vpce_ingress_port
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
@@ -116,7 +116,7 @@ resource "aws_security_group" "vpce" {
 
 resource "aws_vpc_endpoint" "ecr_api" {
   vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-southeast-1.ecr.api"
+  service_name        = "com.amazonaws.${var.region}.ecr.api"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = aws_subnet.private[*].id
   security_group_ids  = [aws_security_group.vpce.id]
@@ -127,7 +127,7 @@ resource "aws_vpc_endpoint" "ecr_api" {
 
 resource "aws_vpc_endpoint" "ecr_dkr" {
   vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.ap-southeast-1.ecr.dkr"
+  service_name        = "com.amazonaws.${var.region}.ecr.dkr"
   vpc_endpoint_type   = "Interface"
   subnet_ids          = aws_subnet.private[*].id
   security_group_ids  = [aws_security_group.vpce.id]
@@ -138,11 +138,11 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
 
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.ap-southeast-1.s3"
+  service_name      = "com.amazonaws.${var.region}.s3"
   vpc_endpoint_type = "Gateway"
 
   route_table_ids = concat(
     [aws_route_table.public.id],
-    aws_route_table.private[*].id   
+    aws_route_table.private[*].id
   )
 }

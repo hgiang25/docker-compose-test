@@ -1,32 +1,22 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "= 5.36.0"
-    }
-
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.29"
-    }
-  }
+provider "aws" {
+  region = var.region
 }
 
-provider "aws" {
-  region = "ap-southeast-1"
+locals {
+  argocd_role_arn = "arn:aws:iam::${var.account_id}:role/${var.argocd_role_name}"
 }
 
 # =========================================================
-# MANAGEMENT CLUSTER
+# MANAGEMENT CLUSTER (where ArgoCD lives, secrets land here)
 # =========================================================
 
 data "terraform_remote_state" "management" {
   backend = "s3"
 
   config = {
-    bucket = "terraform-state-voting-app-123456"
-    key    = "management-infra/terraform.tfstate"
-    region = "ap-southeast-1"
+    bucket = var.state_bucket
+    key    = var.management_infra_state_key
+    region = var.region
   }
 }
 
@@ -45,16 +35,18 @@ provider "kubernetes" {
 }
 
 # =========================================================
-# DEV CLUSTER
+# TARGET CLUSTERS (one remote_state per entry in target_clusters)
 # =========================================================
 
-data "terraform_remote_state" "dev" {
+data "terraform_remote_state" "targets" {
+  for_each = var.target_clusters
+
   backend = "s3"
 
   config = {
-    bucket = "terraform-state-voting-app-123456"
-    key    = "dev_infra/terraform.tfstate"
-    region = "ap-southeast-1"
+    bucket = var.state_bucket
+    key    = each.value.state_key
+    region = var.region
   }
 }
 
@@ -70,16 +62,13 @@ module "argocd_clusters" {
   }
 
   clusters = {
-    dev-cluster = {
-      cluster_name = data.terraform_remote_state.dev.outputs.cluster_name
-
-      server = data.terraform_remote_state.dev.outputs.cluster_endpoint
-
-      ca_data = data.terraform_remote_state.dev.outputs.cluster_ca
-
-      region = "ap-southeast-1"
-
-      role_arn = "arn:aws:iam::248195880649:role/management-cluster-argocd-controller"
+    for name, cfg in var.target_clusters :
+    name => {
+      cluster_name = data.terraform_remote_state.targets[name].outputs.cluster_name
+      server       = data.terraform_remote_state.targets[name].outputs.cluster_endpoint
+      ca_data      = data.terraform_remote_state.targets[name].outputs.cluster_ca
+      region       = cfg.region
+      role_arn     = local.argocd_role_arn
     }
   }
 }

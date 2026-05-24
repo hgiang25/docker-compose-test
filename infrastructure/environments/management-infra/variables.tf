@@ -1,6 +1,5 @@
 variable "region" {
-  type    = string
-  default = "ap-southeast-1"
+  type = string
 }
 
 variable "account_id" {
@@ -8,12 +7,12 @@ variable "account_id" {
 }
 
 variable "admin_user_name" {
-  type = string
+  type        = string
+  description = "IAM user granted EKS admin via assume-role + access entry."
 }
 
 variable "environment" {
-  type    = string
-  default = "dev"
+  type = string
 }
 
 variable "cluster_name" {
@@ -34,10 +33,4 @@ variable "private_subnets" {
 
 variable "azs" {
   type = list(string)
-}
-
-variable "argocd_role_name" {
-  type        = string
-  description = "IAM role name (in this account) that ArgoCD on the management cluster assumes to access this cluster."
-  default     = ""
 }

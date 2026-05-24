@@ -1,53 +1,36 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "= 5.36.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = "ap-southeast-1"
+locals {
+  admin_user_arn = "arn:aws:iam::${var.account_id}:user/${var.admin_user_name}"
 }
 
 module "vpc" {
   source = "../../modules/vpc"
 
-  environment     = "management"
-  cluster_name = "management-cluster"
-  vpc_cidr        = "10.10.0.0/16"
+  environment  = var.environment
+  cluster_name = var.cluster_name
 
-  public_subnets = [
-    "10.10.1.0/24",
-    "10.10.2.0/24"
-  ]
+  region = var.region
 
-  private_subnets = [
-    "10.10.3.0/24",
-    "10.10.4.0/24"
-  ]
+  vpc_cidr = var.vpc_cidr
 
-  azs = [
-    "ap-southeast-1a",
-    "ap-southeast-1b"
-  ]
+  public_subnets  = var.public_subnets
+  private_subnets = var.private_subnets
+
+  azs = var.azs
 }
 
 module "eks" {
   source = "../../modules/eks"
 
-  cluster_name = "management-cluster"
+  cluster_name = var.cluster_name
 
   vpc_id             = module.vpc.vpc_id
-  
   private_subnet_ids = module.vpc.private_subnet_ids
 
-  enviroment = "management"
-}
+  enviroment = var.environment
 
+  admin_user_arn = local.admin_user_arn
+}
 
 module "ecr" {
   source = "../../modules/ecr"
 }
-

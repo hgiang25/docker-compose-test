@@ -17,7 +17,7 @@ module "cluster_autoscaler_irsa_role" {
       provider_arn = var.oidc_provider_arn
 
       namespace_service_accounts = [
-        "kube-system:cluster-autoscaler"
+        "${var.cluster_autoscaler_namespace}:${var.cluster_autoscaler_sa_name}"
       ]
     }
   }

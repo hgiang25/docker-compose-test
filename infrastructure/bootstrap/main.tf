@@ -8,17 +8,15 @@ terraform {
 }
 
 provider "aws" {
-  region = "ap-southeast-1"
+  region = var.region
 }
 
 # S3 bucket for Terraform state
 resource "aws_s3_bucket" "tf_state" {
-  bucket = "terraform-state-voting-app-123456" # 🔥 phải unique
-  force_destroy = true
+  bucket        = var.state_bucket
+  force_destroy = var.force_destroy_bucket
 
-  tags = {
-    Name = "terraform-state"
-  }
+  tags = var.tags
 }
 
 # Enable versioning
@@ -32,7 +30,7 @@ resource "aws_s3_bucket_versioning" "versioning" {
 
 # DynamoDB for state locking
 resource "aws_dynamodb_table" "tf_lock" {
-  name         = "terraform-lock"
+  name         = var.lock_table
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 
