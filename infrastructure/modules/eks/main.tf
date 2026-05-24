@@ -8,6 +8,7 @@ module "eks" {
   cluster_version = "1.34"
 
   vpc_id     = var.vpc_id
+  
   subnet_ids = var.private_subnet_ids
 
   enable_irsa = true
@@ -246,4 +247,23 @@ resource "aws_eks_access_policy_association" "argocd" {
   depends_on = [
     aws_eks_access_entry.argocd
   ]
+}
+
+data "aws_vpc" "this" {
+  id = var.vpc_id
+}
+
+resource "aws_security_group_rule" "allow_nlb_to_nodes" {
+  type              = "ingress"
+  from_port         = 0
+  to_port           = 65535
+  protocol          = "tcp"
+
+  security_group_id = module.eks.node_security_group_id
+
+  # IMPORTANT: KHÔNG nên 0.0.0.0/0 trong production
+  # Nhưng để demo OK:
+  cidr_blocks = [data.aws_vpc.this.cidr_block]
+
+  description = "Allow NLB (IP target mode) to reach node/pods"
 }
