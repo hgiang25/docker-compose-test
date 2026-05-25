@@ -19,6 +19,7 @@ resource "kubernetes_secret" "cluster" {
     config = jsonencode({
       awsAuthConfig = {
         clusterName = each.value.cluster_name
+        roleARN     = each.value.role_arn
       }
 
       tlsClientConfig = {
