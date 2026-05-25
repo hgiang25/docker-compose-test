@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-kube-prometheus-prometheus-nodeport
+  namespace: prometheus
+spec:
+  type: NodePort
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090
+  selector:
+    # Đây là 2 nhãn quan trọng nhất để khớp với Pod của bạn
+    app.kubernetes.io/name: prometheus
+    prometheus: monitoring-kube-prometheus-prometheus

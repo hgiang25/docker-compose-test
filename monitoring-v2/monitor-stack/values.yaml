@@ -1,0 +1,7 @@
+prometheus:
+  prometheusSpec:
+    additionalScrapeConfigs:
+      name: additional-scrape-configs
+      key: dev-scrape.yaml
+    secrets:
+      - kubeconfig-dev  # Mount secret này vào pod
