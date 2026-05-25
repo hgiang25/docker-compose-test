@@ -17,3 +17,11 @@ output "requester_node_security_group_id" {
 output "accepter_node_security_group_id" {
   value = tolist(data.aws_security_groups.accepter_node.ids)[0]
 }
+
+output "requester_cluster_security_group_id" {
+  value = tolist(data.aws_security_groups.requester_cluster.ids)[0]
+}
+
+output "accepter_cluster_security_group_id" {
+  value = tolist(data.aws_security_groups.accepter_cluster.ids)[0]
+}

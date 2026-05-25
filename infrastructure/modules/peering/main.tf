@@ -43,6 +43,32 @@ data "aws_security_groups" "accepter_node" {
   }
 }
 
+# Locate cluster security groups (control-plane SG, tagged Name = "<cluster_name>-cluster").
+# Needed to allow cross-VPC access to the EKS API endpoint (port 443).
+data "aws_security_groups" "requester_cluster" {
+  filter {
+    name   = "vpc-id"
+    values = [var.requester_vpc_id]
+  }
+
+  filter {
+    name   = "tag:Name"
+    values = ["${var.requester_cluster_name}-cluster"]
+  }
+}
+
+data "aws_security_groups" "accepter_cluster" {
+  filter {
+    name   = "vpc-id"
+    values = [var.accepter_vpc_id]
+  }
+
+  filter {
+    name   = "tag:Name"
+    values = ["${var.accepter_cluster_name}-cluster"]
+  }
+}
+
 # ---------------- VPC Peering Connection ----------------
 resource "aws_vpc_peering_connection" "this" {
   vpc_id      = var.requester_vpc_id
@@ -72,30 +98,52 @@ resource "aws_route" "accepter_to_requester" {
 }
 
 # ---------------- Security Group Rules ----------------
-# Ingress on requester node SG: allow accepter VPC CIDR on each TCP port.
-resource "aws_security_group_rule" "requester_ingress_from_accepter" {
-  for_each = { for p in var.allowed_tcp_ports : tostring(p) => p }
 
+# Node SGs: allow all TCP from peer VPC CIDR.
+# Pods use VPC CNI so their IPs come from the VPC CIDR; restricting to individual
+# ports would silently block cross-cluster service traffic on arbitrary ports.
+resource "aws_security_group_rule" "requester_node_ingress_from_accepter" {
   type              = "ingress"
-  from_port         = each.value
-  to_port           = each.value
+  from_port         = 0
+  to_port           = 65535
   protocol          = "tcp"
   cidr_blocks       = [data.aws_vpc.accepter.cidr_block]
   security_group_id = tolist(data.aws_security_groups.requester_node.ids)[0]
 
-  description = "Peering: allow tcp/${each.value} from ${var.accepter_cluster_name} VPC"
+  description = "Peering: allow all TCP from ${var.accepter_cluster_name} VPC"
 }
 
-# Ingress on accepter node SG: allow requester VPC CIDR on each TCP port.
-resource "aws_security_group_rule" "accepter_ingress_from_requester" {
-  for_each = { for p in var.allowed_tcp_ports : tostring(p) => p }
-
+resource "aws_security_group_rule" "accepter_node_ingress_from_requester" {
   type              = "ingress"
-  from_port         = each.value
-  to_port           = each.value
+  from_port         = 0
+  to_port           = 65535
   protocol          = "tcp"
   cidr_blocks       = [data.aws_vpc.requester.cidr_block]
   security_group_id = tolist(data.aws_security_groups.accepter_node.ids)[0]
 
-  description = "Peering: allow tcp/${each.value} from ${var.requester_cluster_name} VPC"
+  description = "Peering: allow all TCP from ${var.requester_cluster_name} VPC"
+}
+
+# Cluster SGs: allow port 443 from peer VPC CIDR.
+# Required for cross-VPC access to the EKS API endpoint (ArgoCD, kubectl via peering).
+resource "aws_security_group_rule" "requester_cluster_ingress_from_accepter" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [data.aws_vpc.accepter.cidr_block]
+  security_group_id = tolist(data.aws_security_groups.requester_cluster.ids)[0]
+
+  description = "Peering: allow EKS API (443) from ${var.accepter_cluster_name} VPC"
+}
+
+resource "aws_security_group_rule" "accepter_cluster_ingress_from_requester" {
+  type              = "ingress"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [data.aws_vpc.requester.cidr_block]
+  security_group_id = tolist(data.aws_security_groups.accepter_cluster.ids)[0]
+
+  description = "Peering: allow EKS API (443) from ${var.requester_cluster_name} VPC"
 }
