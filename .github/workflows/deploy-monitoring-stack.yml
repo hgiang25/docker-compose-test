@@ -6,11 +6,11 @@ on:
       dev_cluster_name:
         description: 'Dev cluster name'
         required: true
-        default: 'dev-huy-cluster'
+        default: 'dev-cluster'
       management_cluster_name:
         description: 'Management cluster name'
         required: true
-        default: 'management-huy-cluster'
+        default: 'management-cluster'
       helm_repo_name:
         description: 'Helm repo name'
         required: true
