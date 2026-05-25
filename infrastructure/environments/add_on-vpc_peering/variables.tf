@@ -16,11 +16,6 @@ variable "accepter_state_key" {
   description = "S3 state key of the accepter-side infra stack."
 }
 
-variable "allowed_tcp_ports" {
-  type    = list(number)
-  default = [30080, 30090]
-}
-
 variable "tags" {
   type = map(string)
   default = {

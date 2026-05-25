@@ -31,7 +31,5 @@ module "peering" {
   accepter_vpc_id       = data.terraform_remote_state.accepter.outputs.vpc_id
   accepter_cluster_name = data.terraform_remote_state.accepter.outputs.cluster_name
 
-  allowed_tcp_ports = var.allowed_tcp_ports
-
   tags = var.tags
 }
