@@ -221,7 +221,7 @@ jobs:
 
       - name: Upload Deployment Info
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: loki-deployment-info
           path: loki-deployment-info.txt
