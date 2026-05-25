@@ -12,20 +12,36 @@ on:
           - dev
           - prod
 
+      version:
+        description: "Prod version (example: v1.0.0)"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REGISTRY: 248195880649.dkr.ecr.ap-southeast-1.amazonaws.com
+
 jobs:
   build-and-update:
     runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ap-southeast-1
-      ECR_REGISTRY: 248195880649.dkr.ecr.ap-southeast-1.amazonaws.com
-
     steps:
-      # 1. Checkout source code
+      # =========================================================
+      # CHECKOUT SOURCE
+      # =========================================================
       - name: Checkout App Repo
         uses: actions/checkout@v4
 
-      # 2. Configure AWS
+      # =========================================================
+      # AWS AUTH
+      # =========================================================
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -33,29 +49,83 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 3. Login ECR
+      # =========================================================
+      # LOGIN ECR
+      # =========================================================
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 4. Build Docker images
-      - name: Build Images
+      # =========================================================
+      # SET IMAGE TAG
+      # =========================================================
+      - name: Set Image Tag
         run: |
-          docker build -t $ECR_REGISTRY/vote-app:${GITHUB_SHA} ./vote
-          docker build -t $ECR_REGISTRY/result-app:${GITHUB_SHA} ./result
-          docker build -t $ECR_REGISTRY/worker-app:${GITHUB_SHA} ./worker
+          ENV=${{ github.event.inputs.environment }}
 
-      # 5. Push Docker images
-      - name: Push Images
+          if [ "$ENV" = "prod" ]; then
+
+            VERSION=${{ github.event.inputs.version }}
+
+            if [ -z "$VERSION" ]; then
+              echo "ERROR: prod deployment requires version"
+              exit 1
+            fi
+
+            IMAGE_TAG=$VERSION
+
+          else
+            IMAGE_TAG=${GITHUB_SHA}
+          fi
+
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+          echo "Using image tag: $IMAGE_TAG"
+
+      # =========================================================
+      # BUILD IMAGES
+      # =========================================================
+      - name: Build Vote Image
         run: |
-          docker push $ECR_REGISTRY/vote-app:${GITHUB_SHA}
-          docker push $ECR_REGISTRY/result-app:${GITHUB_SHA}
-          docker push $ECR_REGISTRY/worker-app:${GITHUB_SHA}
+          docker build \
+            -t $ECR_REGISTRY/vote-app:$IMAGE_TAG \
+            ./vote
 
-      # 6. Install Kustomize
+      - name: Build Result Image
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/result-app:$IMAGE_TAG \
+            ./result
+
+      - name: Build Worker Image
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/worker-app:$IMAGE_TAG \
+            ./worker
+
+      # =========================================================
+      # PUSH IMAGES
+      # =========================================================
+      - name: Push Vote Image
+        run: |
+          docker push $ECR_REGISTRY/vote-app:$IMAGE_TAG
+
+      - name: Push Result Image
+        run: |
+          docker push $ECR_REGISTRY/result-app:$IMAGE_TAG
+
+      - name: Push Worker Image
+        run: |
+          docker push $ECR_REGISTRY/worker-app:$IMAGE_TAG
+
+      # =========================================================
+      # INSTALL KUSTOMIZE
+      # =========================================================
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
 
-      # 7. Clone GitOps repo
+      # =========================================================
+      # CLONE GITOPS REPO
+      # =========================================================
       - name: Clone GitOps Repo
         uses: actions/checkout@v4
         with:
@@ -63,23 +133,27 @@ jobs:
           token: ${{ secrets.GITOPS_PAT }}
           path: k8s-gitops
 
-      # 8. Update image tags
-      - name: Update image tag
+      # =========================================================
+      # UPDATE IMAGE TAGS
+      # =========================================================
+      - name: Update image tags
         run: |
           ENV=${{ github.event.inputs.environment }}
 
           cd k8s-gitops/apps/$ENV
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/vote-app=$ECR_REGISTRY/vote-app:${GITHUB_SHA}
+          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/vote-app=$ECR_REGISTRY/vote-app:$IMAGE_TAG
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/result-app=$ECR_REGISTRY/result-app:${GITHUB_SHA}
+          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/result-app=$ECR_REGISTRY/result-app:$IMAGE_TAG
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/worker-app=$ECR_REGISTRY/worker-app:${GITHUB_SHA}
+          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/worker-app=$ECR_REGISTRY/worker-app:$IMAGE_TAG
 
-      # 9. Commit and push GitOps changes
+      # =========================================================
+      # COMMIT + PUSH
+      # =========================================================
       - name: Commit and Push
         run: |
           ENV=${{ github.event.inputs.environment }}
@@ -91,6 +165,7 @@ jobs:
 
           git add .
 
-          git diff --staged --quiet || git commit -m "update $ENV image to ${GITHUB_SHA}"
+          git diff --staged --quiet || \
+          git commit -m "deploy $ENV image $IMAGE_TAG"
 
           git push origin main

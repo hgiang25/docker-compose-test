@@ -59,6 +59,23 @@ data "terraform_remote_state" "dev" {
 }
 
 # =========================================================
+# PROD CLUSTER
+# =========================================================
+
+data "terraform_remote_state" "prod" {
+  backend = "s3"
+
+  config = {
+    bucket = "terraform-state-voting-app-123456"
+
+    key    = "prod_infra/terraform.tfstate"
+
+    region = "ap-southeast-1"
+  }
+}
+
+
+# =========================================================
 # ARGOCD CLUSTER REGISTRATION
 # =========================================================
 
@@ -70,12 +87,27 @@ module "argocd_clusters" {
   }
 
   clusters = {
+
     dev-cluster = {
+
       cluster_name = data.terraform_remote_state.dev.outputs.cluster_name
 
       server = data.terraform_remote_state.dev.outputs.cluster_endpoint
 
       ca_data = data.terraform_remote_state.dev.outputs.cluster_ca
+
+      region = "ap-southeast-1"
+
+      role_arn = "arn:aws:iam::248195880649:role/management-cluster-argocd-controller"
+    }
+
+    prod-cluster = {
+
+      cluster_name = data.terraform_remote_state.prod.outputs.cluster_name
+
+      server = data.terraform_remote_state.prod.outputs.cluster_endpoint
+
+      ca_data = data.terraform_remote_state.prod.outputs.cluster_ca
 
       region = "ap-southeast-1"
 
