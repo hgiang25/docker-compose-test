@@ -1,0 +1,12 @@
+
+config:
+  clients:
+    - url: http://LOKI_SERVER_IP:30080/loki/api/v1/push
+
+  snippets:
+    extraLabels:
+      cluster: dev
+
+tolerations:
+  - operator: Exists
+

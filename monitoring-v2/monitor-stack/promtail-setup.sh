@@ -1,0 +1,10 @@
+# Thêm repo cho Loki (Community mới) và Promtail
+helm repo add grafana-community https://grafana-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+
+# Cập nhật lại danh sách chart
+helm repo update
+
+
+# install promtail
+helm upgrade --install promtail grafana/promtail --namespace logging -f values-promtail.yaml

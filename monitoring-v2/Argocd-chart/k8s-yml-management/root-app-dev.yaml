@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+
+metadata:
+  name: root-app-dev
+  namespace: argocd
+
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Huycon2352/Repo-app-ops
+    targetRevision: main
+    path: apps/dev
+# Change here to select cluster ( through cluster api ) 
+  destination:
+    server: https://172.20.0.2:6443
+    namespace: dev
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+    syncOptions:
+      - CreateNamespace=true

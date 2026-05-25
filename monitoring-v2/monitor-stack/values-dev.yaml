@@ -1,0 +1,38 @@
+
+# Tắt các thành phần không cần thiết
+grafana:
+  enabled: false
+alertmanager:
+  enabled: false
+prometheusOperator:
+  enabled: true 
+
+prometheus:
+  enabled: true
+  # QUAN TRỌNG: Kích hoạt Agent Mode ở đây
+  agentMode: true 
+  
+  prometheusSpec:
+    # Sửa image sang Docker Hub để tránh lỗi DNS quay.io
+    image:
+      registry: docker.io
+      repository: prom/prometheus
+      tag: v2.45.0 
+    
+    # Label để phân biệt trên Management Cluster
+    externalLabels:
+      cluster: "dev-cluster"
+
+    # Cấu hình Remote Write (Đảm bảo IP và Port chính xác)
+    remoteWrite:
+      - url: "http://10.3.11.230:30090/api/v1/write"
+    
+    # Khi dùng Agent mode, các thông số này có thể để mặc định hoặc tối giản
+    retention: 1h
+    storageSpec: {} 
+
+# Giữ lại các bộ thu thập dữ liệu
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true

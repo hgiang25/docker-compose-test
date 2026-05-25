@@ -1,0 +1,10 @@
+grafana:
+  grafana.ini:
+    smtp:
+      enabled: true
+      host: smtp.gmail.com:587
+      user: lephuchuy951@gmail.com
+      password: $__env{GF_SMTP_PASSWORD}
+      from_address: lephuchuy951@gmail.com
+      from_name: Grafana
+      skip_verify: true
