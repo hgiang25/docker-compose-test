@@ -8,5 +8,5 @@ helm repo update
 # install loki
 helm upgrade --install loki grafana-community/loki --namespace loki --create-namespace -f values-loki.yaml
 
-# install promtail
-helm upgrade --install promtail grafana/promtail --namespace logging -f values-promtail.yaml
+#appli nodeport
+kubectl apply -f loki-gateway-nodeport.yaml -n loki

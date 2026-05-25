@@ -1,0 +1,227 @@
+name: Deploy Loki Stack - V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_cluster_name:
+        description: 'Dev cluster name'
+        required: true
+        default: 'dev-huy-cluster'
+      management_cluster_name:
+        description: 'Management cluster name'
+        required: true
+        default: 'management-huy-cluster'
+
+env:
+  AWS_REGION: "ap-southeast-1"
+  AWS_ACCOUNT_ID: "248195880649"
+  MONITORING_DIR: "./monitoring-v2/monitor-stack"
+  LOKI_NAMESPACE: "loki"
+  LOGGING_NAMESPACE: "logging"
+
+jobs:
+  deploy-loki:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      # ============================================================
+      # 1. Configure AWS & Update Kubeconfig
+      # ============================================================
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for Dev Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ github.event.inputs.dev_cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for Management Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ github.event.inputs.management_cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Display Available Contexts
+        run: |
+          echo "Available kubeconfig contexts:"
+          kubectl config get-contexts
+
+      # ============================================================
+      # 2. Get Management Cluster Node IPs
+      # ============================================================
+      - name: Switch to Management Cluster Context
+        run: |
+          MGMT_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.management_cluster_name }} | awk '{print $2}')
+          echo "Using Management context: ${MGMT_CONTEXT}"
+          kubectl config use-context ${MGMT_CONTEXT}
+
+      - name: Get Management Cluster Node IPs
+        id: mgmt_nodes
+        run: |
+          # Lấy IP từ ExternalIP hoặc InternalIP
+          MGMT_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+          if [ -z "$MGMT_FIRST_IP" ]; then
+            MGMT_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+          fi
+          
+          # Lấy tất cả IPs
+          MGMT_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="ExternalIP")].address}' | tr ' ' ',')
+          if [ -z "$MGMT_NODE_IPS" ]; then
+            MGMT_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' | tr ' ' ',')
+          fi
+          
+          echo "mgmt_first_ip=${MGMT_FIRST_IP}" >> $GITHUB_OUTPUT
+          echo "mgmt_node_ips=${MGMT_NODE_IPS}" >> $GITHUB_OUTPUT
+          echo "Management Cluster First IP: ${MGMT_FIRST_IP}"
+          echo "Management Cluster All Node IPs: ${MGMT_NODE_IPS}"
+
+      # ============================================================
+      # 3. Deploy Loki to Management Cluster
+      # ============================================================
+      - name: Create Loki Namespace (Management)
+        run: |
+          kubectl create namespace ${{ env.LOKI_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Add Helm Repositories
+        run: |
+          helm repo add grafana-community https://grafana-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+
+      - name: Deploy Loki Stack (Management)
+        run: |
+          helm upgrade --install loki grafana-community/loki \
+            --namespace ${{ env.LOKI_NAMESPACE }} \
+            --values ${{ env.MONITORING_DIR }}/values-loki.yaml
+
+      - name: Apply Loki Gateway NodePort (Management)
+        run: |
+          kubectl apply -f ${{ env.MONITORING_DIR }}/loki-gateway-nodeport.yaml -n ${{ env.LOKI_NAMESPACE }}
+
+      - name: Wait for Loki Deployment
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=loki -n ${{ env.LOKI_NAMESPACE }} --timeout=300s || echo "Loki deployment check completed"
+
+      # ============================================================
+      # 4. Deploy Promtail Agent to Dev Cluster with Dynamic Loki IP
+      # ============================================================
+      - name: Switch to Dev Cluster Context
+        run: |
+          DEV_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.dev_cluster_name }} | awk '{print $2}')
+          echo "Using Dev context: ${DEV_CONTEXT}"
+          kubectl config use-context ${DEV_CONTEXT}
+
+      - name: Create Logging Namespace (Dev)
+        run: |
+          kubectl create namespace ${{ env.LOGGING_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Update Promtail Values with Dynamic Loki IP
+        run: |
+          # Thay thế IP Loki placeholder bằng IP thực từ management cluster
+          sed -i "s|LOKI_SERVER_IP|${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}|g" ${{ env.MONITORING_DIR }}/values-promtail.yaml
+          
+          echo "Updated values-promtail.yaml with Loki Server IP: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}"
+          echo "Content of updated values-promtail.yaml:"
+          cat ${{ env.MONITORING_DIR }}/values-promtail.yaml
+
+      - name: Deploy Promtail Agent (Dev)
+        run: |
+          helm upgrade --install promtail grafana/promtail \
+            --namespace ${{ env.LOGGING_NAMESPACE }} \
+            --values ${{ env.MONITORING_DIR }}/values-promtail.yaml
+
+      - name: Wait for Promtail Deployment
+        run: |
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=promtail -n ${{ env.LOGGING_NAMESPACE }} --timeout=300s || echo "Promtail deployment check completed"
+
+      # ============================================================
+      # 5. Get Dev Cluster Node IPs
+      # ============================================================
+      - name: Get Dev Cluster Nodes IPs
+        id: dev_nodes
+        run: |
+          # Lấy IP từ ExternalIP hoặc InternalIP
+          DEV_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+          if [ -z "$DEV_FIRST_IP" ]; then
+            DEV_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+          fi
+          
+          DEV_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="ExternalIP")].address}' | tr ' ' ',')
+          if [ -z "$DEV_NODE_IPS" ]; then
+            DEV_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' | tr ' ' ',')
+          fi
+          
+          echo "dev_first_ip=${DEV_FIRST_IP}" >> $GITHUB_OUTPUT
+          echo "dev_node_ips=${DEV_NODE_IPS}" >> $GITHUB_OUTPUT
+          echo "Dev Cluster First IP: ${DEV_FIRST_IP}"
+          echo "Dev Cluster All Node IPs: ${DEV_NODE_IPS}"
+
+      # ============================================================
+      # 6. Display Loki Stack Deployment Info
+      # ============================================================
+      - name: Switch back to Management Cluster
+        run: |
+          MGMT_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.management_cluster_name }} | awk '{print $2}')
+          kubectl config use-context ${MGMT_CONTEXT}
+
+      - name: Display Loki Stack Deployment Info
+        run: |
+          echo "=========================================="
+          echo "✅ Loki Stack Deployed Successfully!"
+          echo "=========================================="
+          echo ""
+          echo "📊 MANAGEMENT CLUSTER (Loki Central)"
+          echo "   Cluster: ${{ github.event.inputs.management_cluster_name }}"
+          echo "   Node IPs: ${{ steps.mgmt_nodes.outputs.mgmt_node_ips }}"
+          echo "   Loki IP for Dev Push: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}"
+          echo "   Namespace: ${{ env.LOKI_NAMESPACE }}"
+          echo "   Loki Gateway URL: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080"
+          echo "   Loki Push API: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080/loki/api/v1/push"
+          echo ""
+          echo "📊 DEV CLUSTER (Promtail Agent)"
+          echo "   Cluster: ${{ github.event.inputs.dev_cluster_name }}"
+          echo "   Node IPs: ${{ steps.dev_nodes.outputs.dev_node_ips }}"
+          echo "   Namespace: ${{ env.LOGGING_NAMESPACE }}"
+          echo "   Promtail Remote Write URL: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080/loki/api/v1/push"
+          echo ""
+          echo "📝 DEPLOYMENT CONFIGURATION"
+          echo "   Loki Namespace: ${{ env.LOKI_NAMESPACE }}"
+          echo "   Logging Namespace: ${{ env.LOGGING_NAMESPACE }}"
+          echo "=========================================="
+
+      - name: Save Deployment Info to Artifacts
+        run: |
+          cat > loki-deployment-info.txt << EOF
+          Loki Stack Deployment Info
+          ============================
+          
+          Management Cluster: ${{ github.event.inputs.management_cluster_name }}
+          Management Node IPs: ${{ steps.mgmt_nodes.outputs.mgmt_node_ips }}
+          Loki Server IP for Push: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}
+          
+          Dev Cluster: ${{ github.event.inputs.dev_cluster_name }}
+          Dev Node IPs: ${{ steps.dev_nodes.outputs.dev_node_ips }}
+          
+          Loki Gateway: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080
+          Loki Push API: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080/loki/api/v1/push
+          
+          Dev Promtail Remote Write: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30080/loki/api/v1/push
+          
+          Loki Namespace: ${{ env.LOKI_NAMESPACE }}
+          Logging Namespace: ${{ env.LOGGING_NAMESPACE }}
+          EOF
+          cat loki-deployment-info.txt
+
+      - name: Upload Deployment Info
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: loki-deployment-info
+          path: loki-deployment-info.txt
