@@ -1,0 +1,224 @@
+name: Deploy Monitoring Stack - V2
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_cluster_name:
+        description: 'Dev cluster name'
+        required: true
+        default: 'dev-cluster'
+      management_cluster_name:
+        description: 'Management cluster name'
+        required: true
+        default: 'management-cluster'
+      helm_repo_name:
+        description: 'Helm repo name'
+        required: true
+        default: 'kube-monitoring-stack'
+      helm_repo_url:
+        description: 'Helm repo URL'
+        required: true
+        default: 'https://prometheus-community.github.io/helm-charts'
+
+env:
+  AWS_REGION: "ap-southeast-1"
+  AWS_ACCOUNT_ID: "248195880649"
+  MONITORING_DIR: "./monitoring-v2/monitor-stack"
+  PROMETHEUS_NAMESPACE: "prometheus"
+  MONITORING_NAMESPACE: "monitoring"
+
+jobs:
+  deploy-monitoring:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      # ============================================================
+      # 1. Configure AWS & Update Kubeconfig
+      # ============================================================
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for Dev Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ github.event.inputs.dev_cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for Management Cluster
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ github.event.inputs.management_cluster_name }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Display Available Contexts
+        run: |
+          echo "Available kubeconfig contexts:"
+          kubectl config get-contexts
+
+      # ============================================================
+      # 2. Setup Helm
+      # ============================================================
+      - name: Add Helm Repository
+        run: |
+          helm repo add ${{ github.event.inputs.helm_repo_name }} ${{ github.event.inputs.helm_repo_url }}
+          helm repo update
+
+      # ============================================================
+      # 3. Deploy Monitoring Stack to Management Cluster
+      # ============================================================
+      - name: Switch to Management Cluster Context
+        run: |
+          MGMT_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.management_cluster_name }} | awk '{print $2}')
+          echo "Using Management context: ${MGMT_CONTEXT}"
+          kubectl config use-context ${MGMT_CONTEXT}
+
+      - name: Create Prometheus Namespace (Management)
+        run: |
+          kubectl create namespace ${{ env.PROMETHEUS_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm Install/Upgrade Monitoring Stack (Management)
+        run: |
+          helm upgrade --install monitoring \
+            ${{ github.event.inputs.helm_repo_name }}/kube-prometheus-stack \
+            --namespace ${{ env.PROMETHEUS_NAMESPACE }} \
+            --values ${{ env.MONITORING_DIR }}/values-central.yaml
+
+      - name: Apply Prometheus NodePort (Management)
+        run: |
+          kubectl apply -f ${{ env.MONITORING_DIR }}/prometheus-nodeport.yaml
+
+      - name: Get Management Cluster Nodes IPs
+        id: mgmt_nodes
+        run: |
+          # Lấy IP từ InternalIP hoặc ExternalIP
+          MGMT_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+          if [ -z "$MGMT_FIRST_IP" ]; then
+            MGMT_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+          fi
+          
+          # Lấy tất cả IPs
+          MGMT_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="ExternalIP")].address}' | tr ' ' ',')
+          if [ -z "$MGMT_NODE_IPS" ]; then
+            MGMT_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' | tr ' ' ',')
+          fi
+          
+          echo "mgmt_first_ip=${MGMT_FIRST_IP}" >> $GITHUB_OUTPUT
+          echo "mgmt_node_ips=${MGMT_NODE_IPS}" >> $GITHUB_OUTPUT
+          echo "Management Cluster First IP: ${MGMT_FIRST_IP}"
+          echo "Management Cluster All Node IPs: ${MGMT_NODE_IPS}"
+
+      # ============================================================
+      # 4. Deploy Agent to Dev Cluster with Dynamic URL
+      # ============================================================
+      - name: Switch to Dev Cluster Context
+        run: |
+          DEV_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.dev_cluster_name }} | awk '{print $2}')
+          echo "Using Dev context: ${DEV_CONTEXT}"
+          kubectl config use-context ${DEV_CONTEXT}
+
+      - name: Create Monitoring Namespace (Dev)
+        run: |
+          kubectl create namespace ${{ env.MONITORING_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create values-dev.yaml with Dynamic Management IP
+        run: |
+          # Lấy nội dung file values-dev.yaml gốc
+          cp ${{ env.MONITORING_DIR }}/values-dev.yaml /tmp/values-dev-temp.yaml
+          
+          # Thay thế IP cũ bằng IP mới từ management cluster
+          sed -i "s|http://[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+:30090/api/v1/write|http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30090/api/v1/write|g" /tmp/values-dev-temp.yaml
+          
+          echo "Updated values-dev.yaml with Management IP: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}"
+          grep -A 2 "remoteWrite:" /tmp/values-dev-temp.yaml || echo "remoteWrite not found"
+
+      - name: Helm Install/Upgrade Monitoring Agent (Dev)
+        run: |
+          helm upgrade --install agent \
+            ${{ github.event.inputs.helm_repo_name }}/kube-prometheus-stack \
+            --namespace ${{ env.MONITORING_NAMESPACE }} \
+            --values /tmp/values-dev-temp.yaml
+
+      - name: Get Dev Cluster Nodes IPs
+        id: dev_nodes
+        run: |
+          # Lấy IP từ ExternalIP hoặc InternalIP
+          DEV_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+          if [ -z "$DEV_FIRST_IP" ]; then
+            DEV_FIRST_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+          fi
+          
+          DEV_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="ExternalIP")].address}' | tr ' ' ',')
+          if [ -z "$DEV_NODE_IPS" ]; then
+            DEV_NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' | tr ' ' ',')
+          fi
+          
+          echo "dev_first_ip=${DEV_FIRST_IP}" >> $GITHUB_OUTPUT
+          echo "dev_node_ips=${DEV_NODE_IPS}" >> $GITHUB_OUTPUT
+          echo "Dev Cluster First IP: ${DEV_FIRST_IP}"
+          echo "Dev Cluster All Node IPs: ${DEV_NODE_IPS}"
+
+      # ============================================================
+      # 5. Get Grafana Password & Display Dashboard Info
+      # ============================================================
+      - name: Switch back to Management Cluster
+        run: |
+          MGMT_CONTEXT=$(kubectl config get-contexts | grep ${{ github.event.inputs.management_cluster_name }} | awk '{print $2}')
+          kubectl config use-context ${MGMT_CONTEXT}
+
+      - name: Get Grafana Password
+        id: grafana_password
+        run: |
+          GRAFANA_PASSWORD=$(kubectl get secret -n ${{ env.PROMETHEUS_NAMESPACE }} monitoring-grafana -o jsonpath="{.data.admin-password}" 2>/dev/null | base64 -d || echo "admin")
+          echo "grafana_password=${GRAFANA_PASSWORD}" >> $GITHUB_OUTPUT
+          echo "::add-mask::${GRAFANA_PASSWORD}"
+
+      - name: Display Monitoring Dashboard Info
+        run: |
+          echo "=========================================="
+          echo "✅ Monitoring Stack Deployed Successfully!"
+          echo "=========================================="
+          echo ""
+          echo "📊 MANAGEMENT CLUSTER (Central Monitoring)"
+          echo "   Cluster: ${{ github.event.inputs.management_cluster_name }}"
+          echo "   Node IPs: ${{ steps.mgmt_nodes.outputs.mgmt_node_ips }}"
+          echo "   Management IP for Dev Remote Write: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}"
+          echo "   Prometheus URL: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30090/prometheus"
+          echo "   Grafana URL: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30091"
+          echo "   Grafana Username: admin"
+          echo "   Grafana Password: ${{ steps.grafana_password.outputs.grafana_password }}"
+          echo ""
+          echo "📊 DEV CLUSTER (Monitoring Agent)"
+          echo "   Cluster: ${{ github.event.inputs.dev_cluster_name }}"
+          echo "   Node IPs: ${{ steps.dev_nodes.outputs.dev_node_ips }}"
+          echo "   Namespace: ${{ env.MONITORING_NAMESPACE }}"
+          echo "   Remote Write URL: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30090/api/v1/write"
+          echo ""
+          echo "=========================================="
+
+      - name: Save Deployment Info to Artifacts
+        run: |
+          cat > deployment-info.txt << EOF
+          Monitoring Stack Deployment Info
+          ==================================
+          
+          Management Cluster: ${{ github.event.inputs.management_cluster_name }}
+          Management Node IPs: ${{ steps.mgmt_nodes.outputs.mgmt_node_ips }}
+          Management IP for Remote Write: ${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}
+          
+          Dev Cluster: ${{ github.event.inputs.dev_cluster_name }}
+          Dev Node IPs: ${{ steps.dev_nodes.outputs.dev_node_ips }}
+          
+          Prometheus: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30090/prometheus
+          Grafana: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30091
+          Grafana Admin: admin
+          Grafana Password: ${{ steps.grafana_password.outputs.grafana_password }}
+          
+          Dev Remote Write: http://${{ steps.mgmt_nodes.outputs.mgmt_first_ip }}:30090/api/v1/write
+          EOF
+          cat deployment-info.txt
