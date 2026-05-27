@@ -16,13 +16,12 @@ on:
         description: "Prod version (example: v1.0.0)"
         required: false
         type: string
-  push:
-    branches:
-      - main
 
   pull_request:
     branches:
       - main
+    types:
+      - closed
 
 env:
   AWS_REGION: ap-southeast-1
@@ -32,12 +31,36 @@ jobs:
   build-and-update:
     runs-on: ubuntu-latest
 
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.base.ref == 'main'
+      )
+
     steps:
       # =========================================================
       # CHECKOUT SOURCE
       # =========================================================
       - name: Checkout App Repo
         uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # =========================================================
+      # SET DEPLOY ENVIRONMENT
+      # =========================================================
+      - name: Set Deploy Environment
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DEPLOY_ENV="${{ github.event.inputs.environment }}"
+          else
+            DEPLOY_ENV="dev"
+          fi
+
+          echo "DEPLOY_ENV=$DEPLOY_ENV" >> $GITHUB_ENV
+          echo "Deploy environment: $DEPLOY_ENV"
 
       # =========================================================
       # AWS AUTH
@@ -60,11 +83,8 @@ jobs:
       # =========================================================
       - name: Set Image Tag
         run: |
-          ENV=${{ github.event.inputs.environment }}
-
-          if [ "$ENV" = "prod" ]; then
-
-            VERSION=${{ github.event.inputs.version }}
+          if [ "$DEPLOY_ENV" = "prod" ]; then
+            VERSION="${{ github.event.inputs.version }}"
 
             if [ -z "$VERSION" ]; then
               echo "ERROR: prod deployment requires version"
@@ -72,13 +92,11 @@ jobs:
             fi
 
             IMAGE_TAG=$VERSION
-
           else
             IMAGE_TAG=${GITHUB_SHA}
           fi
 
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
           echo "Using image tag: $IMAGE_TAG"
 
       # =========================================================
@@ -138,26 +156,22 @@ jobs:
       # =========================================================
       - name: Update image tags
         run: |
-          ENV=${{ github.event.inputs.environment }}
-
-          cd k8s-gitops/apps/$ENV
+          cd k8s-gitops/apps/$DEPLOY_ENV
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/vote-app=$ECR_REGISTRY/vote-app:$IMAGE_TAG
+            248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/vote-app=$ECR_REGISTRY/vote-app:$IMAGE_TAG
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/result-app=$ECR_REGISTRY/result-app:$IMAGE_TAG
+            248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/result-app=$ECR_REGISTRY/result-app:$IMAGE_TAG
 
           kustomize edit set image \
-          248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/worker-app=$ECR_REGISTRY/worker-app:$IMAGE_TAG
+            248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/worker-app=$ECR_REGISTRY/worker-app:$IMAGE_TAG
 
       # =========================================================
       # COMMIT + PUSH
       # =========================================================
       - name: Commit and Push
         run: |
-          ENV=${{ github.event.inputs.environment }}
-
           cd k8s-gitops
 
           git config user.name "github-actions[bot]"
@@ -166,6 +180,6 @@ jobs:
           git add .
 
           git diff --staged --quiet || \
-          git commit -m "deploy $ENV image $IMAGE_TAG"
+          git commit -m "deploy $DEPLOY_ENV image $IMAGE_TAG"
 
           git push origin main
