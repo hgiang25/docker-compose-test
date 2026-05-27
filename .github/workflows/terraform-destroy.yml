@@ -11,6 +11,10 @@ on:
 env:
   AWS_REGION: ap-southeast-1
 
+concurrency:
+  group: terraform-infra
+  cancel-in-progress: false
+
 jobs:
   destroy:
     if: github.event.inputs.confirm_destroy == 'DESTROY'
@@ -36,13 +40,13 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       # =========================================================
-      # TERRAFORM
+      # SETUP TERRAFORM
       # =========================================================
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
       # =========================================================
-      # KUBECTL
+      # SETUP KUBECTL
       # =========================================================
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
@@ -58,9 +62,34 @@ jobs:
             --region $AWS_REGION || true
 
       # =========================================================
-      # REMOVE ARGOCD FINALIZERS
+      # DELETE ARGOCD APPLICATIONS NORMALLY FIRST
+      # Do not remove finalizers before deleting apps.
+      # Finalizers help ArgoCD prune child resources.
       # =========================================================
-      - name: Remove ArgoCD finalizers
+      - name: Delete ArgoCD applications
+        continue-on-error: true
+        run: |
+          kubectl delete application root-app \
+            -n argocd \
+            --timeout=180s || true
+
+          kubectl delete application voting-dev \
+            -n argocd \
+            --timeout=180s || true
+
+          kubectl delete application voting-prod \
+            -n argocd \
+            --timeout=180s || true
+
+          kubectl delete applications \
+            --all \
+            -n argocd \
+            --timeout=180s || true
+
+      # =========================================================
+      # FALLBACK: REMOVE ARGOCD FINALIZERS ONLY IF STUCK
+      # =========================================================
+      - name: Remove stuck ArgoCD finalizers
         continue-on-error: true
         run: |
           kubectl get applications.argoproj.io \
@@ -74,75 +103,107 @@ jobs:
           done
 
       # =========================================================
-      # DELETE ARGOCD APPS
+      # CLEAN DEV APPLICATION SERVICES / PVC
+      # This is only a safety cleanup before Terraform destroys infra.
       # =========================================================
-      - name: Delete ArgoCD apps
+      - name: Clean dev cluster workloads
         continue-on-error: true
         run: |
-          kubectl delete applications \
-            --all \
-            -n argocd \
-            --timeout=120s || true
+          aws eks update-kubeconfig \
+            --name dev-cluster \
+            --region $AWS_REGION || true
 
-      # =========================================================
-      # DELETE SERVICES
-      # =========================================================
-      - name: Delete Kubernetes LoadBalancers
-        continue-on-error: true
-        run: |
           kubectl delete svc \
             --all \
-            -A \
+            -n dev \
             --timeout=180s || true
 
-      # =========================================================
-      # DELETE PVC
-      # =========================================================
-      - name: Delete PVC
-        continue-on-error: true
-        run: |
           kubectl delete pvc \
             --all \
-            -A \
+            -n dev \
+            --timeout=180s || true
+
+          kubectl delete namespace dev \
             --timeout=180s || true
 
       # =========================================================
-      # WAIT LOADBALANCERS CLEANUP
+      # CLEAN PROD APPLICATION SERVICES / PVC
+      # This is only a safety cleanup before Terraform destroys infra.
       # =========================================================
-      - name: Wait for LoadBalancers cleanup
+      - name: Clean prod cluster workloads
         continue-on-error: true
         run: |
-          echo "Checking remaining LoadBalancers..."
+          aws eks update-kubeconfig \
+            --name prod-cluster \
+            --region $AWS_REGION || true
 
-          for i in {1..20}; do
-            COUNT=$(aws elbv2 describe-load-balancers \
-              --query "length(LoadBalancers)" \
-              --output text 2>/dev/null || echo 0)
+          kubectl delete svc \
+            --all \
+            -n prod \
+            --timeout=180s || true
 
-            echo "Remaining LoadBalancers: $COUNT"
+          kubectl delete pvc \
+            --all \
+            -n prod \
+            --timeout=180s || true
 
-            if [ "$COUNT" = "0" ]; then
-              echo "No LoadBalancers remaining"
-              exit 0
-            fi
-
-            sleep 10
-          done
+          kubectl delete namespace prod \
+            --timeout=180s || true
 
       # =========================================================
-      # DESTROY DEV
+      # WAIT A LITTLE FOR LOADBALANCER CONTROLLER CLEANUP
       # =========================================================
-      - name: Destroy Dev Infrastructure
-        working-directory: infrastructure/environments/dev
+      - name: Wait before Terraform destroy
+        run: |
+          sleep 60
+
+      # =========================================================
+      # DESTROY PEERING FIRST IF IT EXISTS
+      # Peering depends on management/dev VPCs, so destroy before VPCs.
+      # =========================================================
+      - name: Destroy VPC peering
+        working-directory: infrastructure/environments/add_on-vpc_peering
         continue-on-error: true
         run: |
           terraform init
           terraform destroy -auto-approve || true
 
       # =========================================================
-      # DESTROY ARGOCD
+      # DESTROY ARGOCD CLUSTER REGISTRATION
+      # This stack depends on management/dev/prod remote states.
+      # Destroy before deleting clusters.
       # =========================================================
-      - name: Destroy ArgoCD
+      - name: Destroy ArgoCD cluster registration
+        working-directory: infrastructure/environments/management-argocd-clusters
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY PROD ADDONS BEFORE PROD INFRA
+      # =========================================================
+      - name: Destroy Prod Addons
+        working-directory: infrastructure/environments/prod-addons
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY DEV ADDONS BEFORE DEV INFRA
+      # =========================================================
+      - name: Destroy Dev Addons
+        working-directory: infrastructure/environments/dev-addons
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY MANAGEMENT ARGOCD BEFORE MANAGEMENT INFRA
+      # =========================================================
+      - name: Destroy Management ArgoCD
         working-directory: infrastructure/environments/management-argocd
         continue-on-error: true
         run: |
@@ -150,7 +211,37 @@ jobs:
           terraform destroy -auto-approve || true
 
       # =========================================================
-      # DESTROY MANAGEMENT
+      # DESTROY MANAGEMENT ADDONS BEFORE MANAGEMENT INFRA
+      # =========================================================
+      - name: Destroy Management Addons
+        working-directory: infrastructure/environments/management-addons
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY PROD INFRA
+      # =========================================================
+      - name: Destroy Prod Infrastructure
+        working-directory: infrastructure/environments/prod_infra
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY DEV INFRA
+      # =========================================================
+      - name: Destroy Dev Infrastructure
+        working-directory: infrastructure/environments/dev_infra
+        continue-on-error: true
+        run: |
+          terraform init
+          terraform destroy -auto-approve || true
+
+      # =========================================================
+      # DESTROY MANAGEMENT INFRA LAST
       # =========================================================
       - name: Destroy Management Infrastructure
         working-directory: infrastructure/environments/management-infra
@@ -160,101 +251,11 @@ jobs:
           terraform destroy -auto-approve || true
 
       # =========================================================
-      # WAIT ENI CLEANUP
+      # OPTIONAL CLEANUP FOR KNOWN LEFTOVERS
+      # This is a fallback cleanup only for resources created by this lab.
+      # It does not delete AWS managed policies.
       # =========================================================
-      - name: Wait for ENI cleanup
-        continue-on-error: true
-        run: |
-          echo "Checking ENIs..."
-
-          for i in {1..30}; do
-            COUNT=$(aws ec2 describe-network-interfaces \
-              --filters Name=status,Values=in-use \
-              --query "length(NetworkInterfaces)" \
-              --output text 2>/dev/null || echo 0)
-
-            echo "Remaining ENIs: $COUNT"
-
-            if [ "$COUNT" = "0" ]; then
-              echo "No ENIs remaining"
-              exit 0
-            fi
-
-            sleep 10
-          done
-
-      # =========================================================
-      # TERMINATE EC2
-      # =========================================================
-      - name: Force terminate EC2 instances
-        continue-on-error: true
-        run: |
-          INSTANCE_IDS=$(aws ec2 describe-instances \
-            --filters Name=instance-state-name,Values=running,pending,stopping,stopped \
-            --query "Reservations[*].Instances[*].InstanceId" \
-            --output text)
-
-          if [ ! -z "$INSTANCE_IDS" ]; then
-            aws ec2 terminate-instances \
-              --instance-ids $INSTANCE_IDS || true
-          fi
-
-      # =========================================================
-      # DELETE NAT GATEWAYS
-      # =========================================================
-      - name: Delete NAT Gateways
-        continue-on-error: true
-        run: |
-          NAT_IDS=$(aws ec2 describe-nat-gateways \
-            --query "NatGateways[*].NatGatewayId" \
-            --output text)
-
-          for nat in $NAT_IDS; do
-            aws ec2 delete-nat-gateway \
-              --nat-gateway-id $nat || true
-          done
-
-      # =========================================================
-      # WAIT NAT CLEANUP
-      # =========================================================
-      - name: Wait NAT cleanup
-        continue-on-error: true
-        run: |
-          for i in {1..20}; do
-            COUNT=$(aws ec2 describe-nat-gateways \
-              --filter Name=state,Values=available,pending,deleting \
-              --query "length(NatGateways)" \
-              --output text 2>/dev/null || echo 0)
-
-            echo "Remaining NAT Gateways: $COUNT"
-
-            if [ "$COUNT" = "0" ]; then
-              echo "No NAT Gateways remaining"
-              exit 0
-            fi
-
-            sleep 10
-          done
-
-      # =========================================================
-      # RELEASE EIPS
-      # =========================================================
-      - name: Release Elastic IPs
-        continue-on-error: true
-        run: |
-          ALLOC_IDS=$(aws ec2 describe-addresses \
-            --query "Addresses[*].AllocationId" \
-            --output text)
-
-          for eip in $ALLOC_IDS; do
-            aws ec2 release-address \
-              --allocation-id $eip || true
-          done
-
-      # =========================================================
-      # DELETE IAM ROLES + POLICIES
-      # =========================================================
-      - name: Delete remaining IAM roles and policies
+      - name: Cleanup known leftover IAM resources
         continue-on-error: true
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity \
@@ -264,29 +265,33 @@ jobs:
           ROLES=(
             management-eks-admin-role
             management-ebs-csi-role
+            management-cluster-argocd-controller
             dev-eks-admin-role
             dev-ebs-csi-role
+            prod-eks-admin-role
+            prod-ebs-csi-role
           )
 
-          POLICIES=(
+          CUSTOM_POLICIES=(
             management-EKSAdminLimitedPolicy
             dev-EKSAdminLimitedPolicy
+            prod-EKSAdminLimitedPolicy
           )
 
-          # ==========================================
-          # DETACH ALL POLICIES FROM ROLES
-          # ==========================================
           for role in "${ROLES[@]}"; do
+            echo "Cleaning role: $role"
 
             ATTACHED=$(aws iam list-attached-role-policies \
               --role-name $role \
               --query 'AttachedPolicies[*].PolicyArn' \
               --output text 2>/dev/null || true)
 
-            for policy in $ATTACHED; do
+            for policy_arn in $ATTACHED; do
+              echo "Detaching $policy_arn from $role"
+
               aws iam detach-role-policy \
                 --role-name $role \
-                --policy-arn $policy || true
+                --policy-arn $policy_arn || true
             done
 
             INLINE=$(aws iam list-role-policies \
@@ -294,57 +299,80 @@ jobs:
               --query 'PolicyNames[*]' \
               --output text 2>/dev/null || true)
 
-            for policy in $INLINE; do
+            for policy_name in $INLINE; do
+              echo "Deleting inline policy $policy_name from $role"
+
               aws iam delete-role-policy \
                 --role-name $role \
-                --policy-name $policy || true
+                --policy-name $policy_name || true
             done
 
             aws iam delete-role \
               --role-name $role || true
           done
 
-          # ==========================================
-          # DELETE CUSTOM POLICIES
-          # ==========================================
-          for policy in "${POLICIES[@]}"; do
+          for policy_name in "${CUSTOM_POLICIES[@]}"; do
+            POLICY_ARN="arn:aws:iam::$ACCOUNT_ID:policy/$policy_name"
+
+            echo "Cleaning custom policy: $POLICY_ARN"
+
+            VERSIONS=$(aws iam list-policy-versions \
+              --policy-arn $POLICY_ARN \
+              --query 'Versions[?IsDefaultVersion==`false`].VersionId' \
+              --output text 2>/dev/null || true)
+
+            for version_id in $VERSIONS; do
+              aws iam delete-policy-version \
+                --policy-arn $POLICY_ARN \
+                --version-id $version_id || true
+            done
+
             aws iam delete-policy \
-              --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/$policy || true
+              --policy-arn $POLICY_ARN || true
           done
 
       # =========================================================
-      # DELETE CLOUDWATCH LOG GROUPS
+      # OPTIONAL CLEANUP FOR KNOWN LEFTOVER KMS ALIASES
+      # Delete aliases only, not KMS keys.
       # =========================================================
-      - name: Delete CloudWatch log groups
-        continue-on-error: true
-        run: |
-          aws logs delete-log-group \
-            --log-group-name /aws/eks/management-cluster/cluster || true
-
-          aws logs delete-log-group \
-            --log-group-name /aws/eks/dev-cluster/cluster || true
-
-      # =========================================================
-      # DELETE KMS ALIASES
-      # =========================================================
-      - name: Delete KMS aliases
+      - name: Cleanup known leftover KMS aliases
         continue-on-error: true
         run: |
           aws kms delete-alias \
-            --alias-name alias/eks/management-cluster || true
+            --alias-name alias/eks/management-cluster \
+            --region $AWS_REGION || true
 
           aws kms delete-alias \
-            --alias-name alias/eks/dev-cluster || true
+            --alias-name alias/eks/dev-cluster \
+            --region $AWS_REGION || true
+
+          aws kms delete-alias \
+            --alias-name alias/eks/prod-cluster \
+            --region $AWS_REGION || true
 
       # =========================================================
-      # DESTROY BOOTSTRAP
+      # OPTIONAL CLEANUP FOR KNOWN EKS LOG GROUPS
       # =========================================================
-      - name: Destroy Bootstrap Backend
-        working-directory: infrastructure/bootstrap
+      - name: Cleanup known CloudWatch log groups
         continue-on-error: true
         run: |
-          terraform init
-          terraform destroy -auto-approve || true
+          aws logs delete-log-group \
+            --log-group-name /aws/eks/management-cluster/cluster \
+            --region $AWS_REGION || true
+
+          aws logs delete-log-group \
+            --log-group-name /aws/eks/dev-cluster/cluster \
+            --region $AWS_REGION || true
+
+          aws logs delete-log-group \
+            --log-group-name /aws/eks/prod-cluster/cluster \
+            --region $AWS_REGION || true
+
+      # =========================================================
+      # IMPORTANT:
+      # Do not destroy bootstrap backend.
+      # Keep S3 state bucket and lock table for the next deployment.
+      # =========================================================
 
       # =========================================================
       # FINAL CHECK
@@ -352,30 +380,62 @@ jobs:
       - name: Remaining AWS resources
         continue-on-error: true
         run: |
-          echo "==== EKS ===="
-          aws eks list-clusters
+          echo "==== EKS CLUSTERS ===="
+          aws eks list-clusters \
+            --region $AWS_REGION
 
-          echo "==== EC2 ===="
-          aws ec2 describe-instances \
-            --query "Reservations[*].Instances[*].[InstanceId,State.Name]" \
-            --output table
+          echo "==== KNOWN IAM ROLES ===="
+          for role in \
+            management-eks-admin-role \
+            management-ebs-csi-role \
+            management-cluster-argocd-controller \
+            dev-eks-admin-role \
+            dev-ebs-csi-role \
+            prod-eks-admin-role \
+            prod-ebs-csi-role
+          do
+            aws iam get-role \
+              --role-name $role \
+              --query 'Role.RoleName' \
+              --output text 2>/dev/null || echo "$role deleted"
+          done
 
-          echo "==== NAT ===="
-          aws ec2 describe-nat-gateways \
-            --query "NatGateways[*].[NatGatewayId,State]" \
-            --output table
+          echo "==== KNOWN IAM POLICIES ===="
+          ACCOUNT_ID=$(aws sts get-caller-identity \
+            --query Account \
+            --output text)
 
-          echo "==== EIP ===="
-          aws ec2 describe-addresses \
-            --query "Addresses[*].[PublicIp]" \
-            --output table
+          for policy in \
+            management-EKSAdminLimitedPolicy \
+            dev-EKSAdminLimitedPolicy \
+            prod-EKSAdminLimitedPolicy
+          do
+            aws iam get-policy \
+              --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/$policy \
+              --query 'Policy.PolicyName' \
+              --output text 2>/dev/null || echo "$policy deleted"
+          done
 
-          echo "==== IAM ROLES ===="
-          aws iam list-roles \
-            --query "Roles[*].RoleName" \
-            --output table
-
-          echo "==== KMS ===="
+          echo "==== KNOWN KMS ALIASES ===="
           aws kms list-aliases \
-            --query "Aliases[*].AliasName" \
+            --region $AWS_REGION \
+            --query "Aliases[?AliasName=='alias/eks/management-cluster' || AliasName=='alias/eks/dev-cluster' || AliasName=='alias/eks/prod-cluster'].AliasName" \
             --output table
+
+          echo "==== LOAD BALANCERS ===="
+          aws elbv2 describe-load-balancers \
+            --region $AWS_REGION \
+            --query "LoadBalancers[*].[LoadBalancerName,State.Code,DNSName]" \
+            --output table || true
+
+          echo "==== NAT GATEWAYS ===="
+          aws ec2 describe-nat-gateways \
+            --region $AWS_REGION \
+            --query "NatGateways[*].[NatGatewayId,State]" \
+            --output table || true
+
+          echo "==== ELASTIC IPS ===="
+          aws ec2 describe-addresses \
+            --region $AWS_REGION \
+            --query "Addresses[*].[PublicIp,AllocationId,AssociationId]" \
+            --output table || true
