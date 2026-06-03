@@ -1,0 +1,118 @@
+name: CI Vote Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      version:
+        description: "Prod version (example: v1.0.0)"
+        required: false
+        type: string
+
+  # pull_request:
+  #   branches:
+  #     - main
+  #   types:
+  #     - closed
+  #   paths:
+  #     - 'vote/**' 
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REGISTRY: 248195880649.dkr.ecr.ap-southeast-1.amazonaws.com
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.base.ref == 'main'
+      )
+
+    steps:
+      - name: Checkout App Repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set Deploy Environment
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DEPLOY_ENV="${{ github.event.inputs.environment }}"
+          else
+            DEPLOY_ENV="dev"
+          fi
+          echo "DEPLOY_ENV=$DEPLOY_ENV" >> $GITHUB_ENV
+          echo "Deploy environment: $DEPLOY_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set Image Tag
+        run: |
+          if [ "$DEPLOY_ENV" = "prod" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              echo "ERROR: prod deployment requires version"
+              exit 1
+            fi
+            IMAGE_TAG=$VERSION
+          else
+            IMAGE_TAG=${GITHUB_SHA}
+          fi
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "Using image tag: $IMAGE_TAG"
+
+      - name: Build Vote Image
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/vote-app:$IMAGE_TAG \
+            ./vote
+
+      - name: Push Vote Image
+        run: |
+          docker push $ECR_REGISTRY/vote-app:$IMAGE_TAG
+
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+
+      - name: Clone GitOps Repo
+        uses: actions/checkout@v4
+        with:
+          repository: hgiang25/k8s-gitops
+          token: ${{ secrets.GITOPS_PAT }}
+          path: k8s-gitops
+
+      - name: Update image tags
+        run: |
+          cd k8s-gitops/apps/$DEPLOY_ENV
+          kustomize edit set image \
+            248195880649.dkr.ecr.ap-southeast-1.amazonaws.com/vote-app=$ECR_REGISTRY/vote-app:$IMAGE_TAG
+
+      - name: Commit and Push
+        run: |
+          cd k8s-gitops
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --staged --quiet || \
+          git commit -m "deploy $DEPLOY_ENV vote-app:$IMAGE_TAG"
+          git push origin main

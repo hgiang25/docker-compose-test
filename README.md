@@ -424,7 +424,7 @@ Possible improvements for this platform:
 
 ## Author
 
-**Hoài An**
+**Hoàng Giang**
 DevOps / Cloud / Kubernetes / GitOps Enthusiast
 
 This project is part of my personal DevOps portfolio, focusing on AWS, Kubernetes, Terraform, CI/CD, and GitOps platform engineering.
